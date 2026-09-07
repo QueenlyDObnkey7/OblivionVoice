@@ -133,36 +133,3 @@ Keys must exist in the installed SDK’s `Key` enum. Hold mode also requires the
 | `Copy-Official-Dependencies.ps1` | Copies SDK dependencies from a local official template. |
 | `OblivionVoice.sln`, `global.json` | Solution and SDK selection. |
 | `THIRD_PARTY.md` | Dependency inventory. |
-
-## Put it on GitHub
-
-Extract this archive and open a terminal inside `OblivionVoice`. Create an empty GitHub repository, then replace YOUR-USERNAME in these commands:
-
-```powershell
-git init
-git add .
-git commit -m "Initial OblivionVoice source release"
-git branch -M main
-git remote add origin https://github.com/YOUR-USERNAME/OblivionVoice.git
-git push -u origin main
-```
-
-The included `.gitignore` excludes SDK binaries, build output, caches and logs. Commit source/config templates; compiled packages can be uploaded separately as releases after testing. Review server-specific config before committing. No license was supplied in the upload, so this cleanup does not choose a license on the author’s behalf.
-
-## Troubleshooting and validation
-
-- Remote players cannot connect: check AdvertisedHost, inbound UDP, router forwarding and whether the relay is listening. `127.0.0.1` points each player at their own PC.
-- Hearing yourself: set Debug.LoopbackMicrophone to false; disabling only Debug.Enabled does not stop server loopback.
-- No voice: check N transmission state, M incoming mute, default Windows microphone/output devices, and that both client/server halves came from the same build.
-- 10 ms frames dropping: raise MaxAudioPacketsPerSecond above the resulting 100 packets/second.
-- Left/right reversed or incorrect range: review InvertPan and calibrate WorldUnitsPerMeter in game.
-- Some options appear to do nothing: see the explicit inactive entries in the configuration table.
-- A startup warning says server routing lacks an adapter: that warning is stale in this source; UdpVoiceRelay does contain position/cell filtering. Actual operation still depends on the position cache obtaining players.
-
-This cleanup was checked for retained source, removed comments, valid JSON/XML and configuration documentation coverage. A full build and in-game test were not possible in the cleanup environment because .NET and PowerShell were unavailable. Validate audio and routing with two clients before releasing a compiled package.
-
-### Cleanup changes
-
-Removed build logs, generated bin/obj output, bundled SDK dependencies, superseded first-build/deploy/check scripts, the old dependency downloader targeting v0.1.0, and outdated standalone guides. Their relevant setup information is consolidated here. All 41 runtime C# source files remain; source, PowerShell and project XML comments were removed.
-
-Build now packages by default and requires an explicit server path for deployment. A missing manifest fails clearly instead of generating inconsistent mod metadata. Removed the client’s duplicate logging package reference (retaining 10.0.8) and corrected the spatial pan call to pass `listener.Rotation.Y` to its float parameter. The uploaded JSON values and RPC contract remain unchanged.
