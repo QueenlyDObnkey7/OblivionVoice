@@ -72,7 +72,7 @@ public sealed class OblivionSpatialVoiceProvider(ILogger logger) : ISpatialVoice
 
             var gain = ComputeGain(distanceMeters, voiceRangeMeters);
 
-            var pan = ComputePan(listener.Rotation.Y, delta, distanceMeters);
+            var pan = ComputePan(listener.Rotation, delta, distanceMeters);
 
             return new SpatialVoiceResult(true, gain, pan, distanceMeters);
         }
