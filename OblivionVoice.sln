@@ -1,0 +1,29 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OblivionVoice.Common", "OblivionVoice.Common\OblivionVoice.Common.csproj", "{A2536491-80C9-4D10-A766-243965AC52CF}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OblivionVoice.Client", "OblivionVoice.Client\OblivionVoice.Client.csproj", "{12696376-0153-497D-9173-74CBA86206D5}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OblivionVoice.Server", "OblivionVoice.Server\OblivionVoice.Server.csproj", "{83CC8465-7BF3-4217-8584-C6B82AFDC9EA}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{A2536491-80C9-4D10-A766-243965AC52CF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A2536491-80C9-4D10-A766-243965AC52CF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A2536491-80C9-4D10-A766-243965AC52CF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A2536491-80C9-4D10-A766-243965AC52CF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{12696376-0153-497D-9173-74CBA86206D5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{12696376-0153-497D-9173-74CBA86206D5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{12696376-0153-497D-9173-74CBA86206D5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{12696376-0153-497D-9173-74CBA86206D5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{83CC8465-7BF3-4217-8584-C6B82AFDC9EA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{83CC8465-7BF3-4217-8584-C6B82AFDC9EA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{83CC8465-7BF3-4217-8584-C6B82AFDC9EA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{83CC8465-7BF3-4217-8584-C6B82AFDC9EA}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

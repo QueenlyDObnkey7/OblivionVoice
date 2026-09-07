@@ -1,0 +1,66 @@
+{
+  "Enabled": true,
+  "Network": {
+    "BindAddress": "0.0.0.0",
+    "AdvertisedHost": "127.0.0.1",
+    "Port": 22100,
+    "SessionTokenTtlSeconds": 60,
+    "ClientTimeoutSeconds": 20,
+    "MaxPacketBytes": 1200,
+    "MaxAudioPacketsPerSecond": 80
+  },
+  "Audio": {
+    "SampleRate": 48000,
+    "Channels": 1,
+    "FrameMilliseconds": 20,
+    "Bitrate": 64000,
+    "EnableDtx": false,
+    "EnableFec": true,
+    "MicrophoneBufferMilliseconds": 40,
+    "PlaybackBufferMilliseconds": 250,
+    "NoiseSuppressionEnabled": true,
+    "VoiceActivityDetectionEnabled": true,
+    "VadOpenThresholdDb": 9.0,
+    "VadCloseThresholdDb": 5.0,
+    "LoudnessNormalizationEnabled": true
+  },
+  "Proximity": {
+    "DefaultMode": "Normal",
+    "WhisperMeters": 2.0,
+    "NormalMeters": 8.0,
+    "ShoutMeters": 25.0,
+    "MaximumReceiveMeters": 35.0,
+    "UseParentCell": true,
+    "ServerSideRouting": true,
+    "WorldUnitsPerMeter": 70.0,
+    "InvertPan": true
+  },
+  "Controls": {
+    "TransmitKey": "N",
+    "TransmitMode": "Toggle",
+    "CycleRangeKey": "H",
+    "ToggleMuteKey": "M",
+    "RadioTransmitKey": "CapsLock"
+  },
+  "Radio": {
+    "Enabled": false,
+    "DefaultChannel": 1,
+    "MaximumChannels": 32
+  },
+  "Ui": {
+    "Enabled": true,
+    "ShowSpeakingIndicator": true,
+    "ShowCurrentRange": true,
+    "BrandName": "OblivionVoice"
+  },
+  "Debug": {
+    "Enabled": true,
+    "LogPackets": false,
+    "LoopbackMicrophone": true,
+    "LogClientStats": true,
+    "LogAudioLevels": true,
+    "LogKeyEvents": true,
+    "ForceTransmit": false,
+    "StatsIntervalSeconds": 2
+  }
+}

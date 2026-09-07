@@ -1,0 +1,13 @@
+{
+  "uniqueId": "OblivionVoice",
+  "version": "0.4.3",
+  "name": "OblivionVoice",
+  "author": "QueenlyDonkey",
+  "description": "Configurable integrated proximity voice transport for OblivionMP.",
+    "dependencies": [
+    {
+      "uniqueId": "OblivionMP.SDK",
+      "minimumVersion": "0.2.0"
+    }
+  ]
+}
