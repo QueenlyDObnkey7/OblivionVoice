@@ -32,7 +32,7 @@
     "MaximumReceiveMeters": 35.0,
     "UseParentCell": true,
     "ServerSideRouting": true,
-    "WorldUnitsPerMeter": 70.0,
+    "WorldUnitsPerMeter": 100.0,
     "InvertPan": true
   },
   "Controls": {
