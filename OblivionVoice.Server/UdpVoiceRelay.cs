@@ -107,7 +107,11 @@ public sealed class UdpVoiceRelay(
                         HandleAudio(result);
                         break;
                     case VoiceUdpProtocol.KeepAlive:
-                        Touch(result.RemoteEndPoint);
+                        if (result.Buffer.Length == 1 && _clientsByEndpoint.TryGetValue(result.RemoteEndPoint, out var heartbeatClient))
+                        {
+                            heartbeatClient.LastSeen = DateTimeOffset.UtcNow;
+                            await _udp.SendAsync(new byte[] { VoiceUdpProtocol.KeepAlive }, result.RemoteEndPoint);
+                        }
                         break;
                     case VoiceUdpProtocol.Disconnect:
                         RemoveEndpoint(result.RemoteEndPoint);
@@ -169,6 +173,7 @@ public sealed class UdpVoiceRelay(
         var config = configLoader.Current;
 
         var mode = (VoiceMode)result.Buffer[3];
+        if (!Enum.IsDefined(mode)) return;
 
         var range = mode switch
         {
@@ -182,11 +187,10 @@ public sealed class UdpVoiceRelay(
         var rangeUnitsSquared = rangeUnits * rangeUnits;
 
         var routing = config.Proximity.ServerSideRouting;
-        VoicePositionCache.PlayerPlacement speakerPlacement = default;
-        var haveSpeakerPosition = false;
-
-        if (routing)
-            haveSpeakerPosition = positions.TryGet(speaker.PlayerId, out speakerPlacement);
+        var isolateCells = config.Proximity.UseParentCell;
+        var snapshot = positions.GetSnapshot();
+        var haveSpeakerPosition = snapshot.TryGetValue(speaker.PlayerId, out var speakerPlacement);
+        if ((routing || isolateCells) && !haveSpeakerPosition) return;
 
         var environment = haveSpeakerPosition
             ? speakerPlacement.Environment
@@ -216,18 +220,11 @@ public sealed class UdpVoiceRelay(
             if (listener.PlayerId == speaker.PlayerId && !config.Debug.LoopbackMicrophone)
                 continue;
 
-            if (routing && haveSpeakerPosition)
+            if (routing || isolateCells)
             {
-                if (!positions.TryGet(listener.PlayerId, out var listenerPlacement))
-                {
-
-                }
-                else if (!speakerPlacement.SharesSpaceWith(listenerPlacement))
-                {
-                    culled++;
-                    continue;
-                }
-                else if (Vector3DistanceSquared(speakerPlacement.Position, listenerPlacement.Position) > rangeUnitsSquared)
+                if (!snapshot.TryGetValue(listener.PlayerId, out var listenerPlacement) ||
+                    (isolateCells && !speakerPlacement.SharesSpaceWith(listenerPlacement)) ||
+                    (routing && Vector3DistanceSquared(speakerPlacement.Position, listenerPlacement.Position) > rangeUnitsSquared))
                 {
                     culled++;
                     continue;
@@ -311,7 +308,7 @@ public sealed class UdpVoiceRelay(
     {
         if (!_clientsByEndpoint.TryRemove(endpoint, out var client)) return;
 
-        _clientsByPlayer.TryRemove(client.PlayerId, out _);
+        ((ICollection<KeyValuePair<string, ClientState>>)_clientsByPlayer).Remove(new(client.PlayerId, client));
 
         if (configLoader.Current.Debug.Enabled)
             logger.LogInformation("[VoiceDebug] UDP disconnected player={PlayerId} endpoint={Endpoint} activeClients={Count}", client.PlayerId, endpoint, _clientsByPlayer.Count);
@@ -330,9 +327,9 @@ public sealed class UdpVoiceRelay(
             foreach (var pair in _clientsByPlayer)
             {
                 if (pair.Value.LastSeen >= cutoff) continue;
-                if (!_clientsByPlayer.TryRemove(pair.Key, out var stale)) continue;
-
-                _clientsByEndpoint.TryRemove(stale.EndPoint, out _);
+                if (!((ICollection<KeyValuePair<string, ClientState>>)_clientsByPlayer).Remove(pair)) continue;
+                var stale = pair.Value;
+                ((ICollection<KeyValuePair<IPEndPoint, ClientState>>)_clientsByEndpoint).Remove(new(stale.EndPoint, stale));
                 logger.LogInformation("Removed stale voice client {PlayerId}", pair.Key);
             }
 

@@ -11,25 +11,7 @@ public sealed class OblivionSpatialVoiceProvider(ILogger logger) : ISpatialVoice
 
     public float WorldUnitsPerMeter { get; set; } = 70f;
 
-    public bool UseParentCell
-    {
-        get => _useParentCell;
-        set
-        {
-            _useParentCell = value;
-            if (!value || _warnedAboutCells) return;
-
-            _warnedAboutCells = true;
-            logger.LogWarning(
-                "useParentCell is enabled but cannot be applied on the client: the ECS entity needed " +
-                "for ParentCellComponent is internal to the SDK. Voice will carry between interiors and " +
-                "the outdoors whenever players are within range. Enable serverSideRouting and filter by " +
-                "cell in the server mod to get this behaviour.");
-
-            Console.WriteLine(
-                "[OblivionVoice] useParentCell has no effect client-side - see log. Use serverSideRouting instead.");
-        }
-    }
+    public bool UseParentCell { get; set; }
 
     public float FullVolumeFraction { get; set; } = 0.15f;
 
@@ -41,8 +23,6 @@ public sealed class OblivionSpatialVoiceProvider(ILogger logger) : ISpatialVoice
 
     public float LastDistanceMeters { get; private set; }
 
-    private bool _useParentCell;
-    private bool _warnedAboutCells;
     private int _missingSpeakerLogs;
 
     public SpatialVoiceResult Resolve(string speakerPlayerId, float voiceRangeMeters)
@@ -51,7 +31,7 @@ public sealed class OblivionSpatialVoiceProvider(ILogger logger) : ISpatialVoice
         {
             var local = SDK.Sync.LocalPlayer;
             if (local is not { } listener)
-                return SpatialVoiceResult.FullVolume;
+                return SpatialVoiceResult.Silent;
 
             if (!TryFindSpeaker(speakerPlayerId, out var speaker))
             {
@@ -67,7 +47,7 @@ public sealed class OblivionSpatialVoiceProvider(ILogger logger) : ISpatialVoice
             var distanceMeters = distanceUnits / MathF.Max(WorldUnitsPerMeter, 0.0001f);
             LastDistanceMeters = distanceMeters;
 
-            if (distanceMeters > voiceRangeMeters)
+            if (!float.IsFinite(distanceMeters) || !float.IsFinite(voiceRangeMeters) || distanceMeters > voiceRangeMeters)
                 return new SpatialVoiceResult(false, 0f, 0f, distanceMeters);
 
             var gain = ComputeGain(distanceMeters, voiceRangeMeters);
@@ -79,8 +59,8 @@ public sealed class OblivionSpatialVoiceProvider(ILogger logger) : ISpatialVoice
         catch (Exception ex)
         {
 
-            logger.LogDebug(ex, "Spatial resolve failed for {Speaker}; falling back to centred full volume.", speakerPlayerId);
-            return SpatialVoiceResult.FullVolume;
+            logger.LogDebug(ex, "Spatial resolve failed for {Speaker}; withholding audio until position is available.", speakerPlayerId);
+            return SpatialVoiceResult.Silent;
         }
     }
 

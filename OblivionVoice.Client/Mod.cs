@@ -41,8 +41,8 @@ public sealed class Mod : ModBase
     private VoiceRuntime _runtime = null!;
     public override void Start()
     {
-        Logger.LogInformation("OblivionVoice 0.4.3 client Start() called.");
-        Console.WriteLine("[OblivionVoice] 0.4.3 client Start() called.");
+        Logger.LogInformation("OblivionVoice 0.4.4 client Start() called.");
+        Console.WriteLine("[OblivionVoice] 0.4.4 client Start() called.");
 
         ApplyRpcOffsetPin();
 

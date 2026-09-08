@@ -113,6 +113,10 @@ public sealed class VoiceConfig
             throw new InvalidOperationException("Audio.FrameMilliseconds must be 10, 20, 40 or 60.");
         if (Audio.Bitrate is < 6000 or > 128000)
             throw new InvalidOperationException("Audio.Bitrate must be 6000-128000.");
+        if (!float.IsFinite(Proximity.WorldUnitsPerMeter) || Proximity.WorldUnitsPerMeter <= 0)
+            throw new InvalidOperationException("WorldUnitsPerMeter must be finite and greater than zero.");
+        if (!float.IsFinite(Proximity.WhisperMeters) || !float.IsFinite(Proximity.NormalMeters) || !float.IsFinite(Proximity.ShoutMeters) || !float.IsFinite(Proximity.MaximumReceiveMeters))
+            throw new InvalidOperationException("All voice ranges must be finite.");
         if (Proximity.WhisperMeters <= 0 || Proximity.NormalMeters <= Proximity.WhisperMeters || Proximity.ShoutMeters <= Proximity.NormalMeters)
             throw new InvalidOperationException("Ranges must satisfy Whisper < Normal < Shout.");
         if (Proximity.MaximumReceiveMeters < Proximity.ShoutMeters)

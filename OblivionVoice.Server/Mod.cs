@@ -104,7 +104,7 @@ public sealed class Mod : ServerModBase
             try
             {
                 var logger = Services.Resolve<ILogger>();
-                logger.LogInformation("OblivionVoice 0.4.3 server initialized.");
+                logger.LogInformation("OblivionVoice 0.4.4 server initialized.");
                 logger.LogInformation("[VoiceDebug] {OffsetState}", VoiceRpcOffsets.Describe());
             }
             catch (Exception loggerEx)
@@ -112,7 +112,7 @@ public sealed class Mod : ServerModBase
                 ServerStartupTrace.Exception("ILogger write FAILED", loggerEx);
             }
 
-            Console.WriteLine("[OblivionVoice] 0.4.3 server initialized.");
+            Console.WriteLine("[OblivionVoice] 0.4.4 server initialized.");
             Console.WriteLine($"[OblivionVoice] {VoiceRpcOffsets.Describe()}");
             ServerStartupTrace.Write("Init COMPLETE");
 

@@ -26,6 +26,29 @@ public sealed class VoiceRuntime(
     public bool Transmitting { get; private set; }
 
     private bool _initialized;
+    private int _bootstrapping;
+    private int _lifecycle;
+    private bool _lastConnected;
+    public bool IsVoiceConnected => network.IsConnected;
+    public bool IsBootstrapping => Volatile.Read(ref _bootstrapping) != 0;
+
+    public void RefreshConnectionState()
+    {
+        var connected = network.IsConnected;
+        if (_lastConnected == connected) return;
+        _lastConnected = connected;
+        if (!connected)
+        {
+            Transmitting = false;
+            keyPoller.Stop();
+            foreach (var speaker in playback.ActiveSpeakers.ToArray())
+            {
+                playback.RemoveSpeaker(speaker);
+                environmentDirector.Forget(speaker);
+            }
+        }
+        UpdateHud();
+    }
 
     private long _microphoneFrames;
     private long _encodedPackets;
@@ -43,69 +66,90 @@ public sealed class VoiceRuntime(
     public async Task BootstrapAsync(VoiceClientSettings settings)
     {
 
-        if (_initialized)
-        {
-            logger.LogInformation("Ignoring duplicate voice bootstrap; already initialized.");
-            Console.WriteLine("[OblivionVoice] Ignoring duplicate bootstrap; already initialized.");
-            return;
-        }
-
-        Settings = settings;
-        CurrentMode = settings.DefaultMode;
-        if (!settings.Enabled)
-        {
-            logger.LogInformation("OblivionVoice is disabled by this server.");
-            return;
-        }
-
+        if (Interlocked.CompareExchange(ref _bootstrapping, 1, 0) != 0) return;
+        var lifecycle = Volatile.Read(ref _lifecycle);
         try
         {
-
-            readyMKeys.Register(settings, this);
-
-            ConfigureSpatial(settings);
-            ConfigurePreprocessor(settings);
-
-            codec.Configure(settings.SampleRate, settings.Channels, settings.FrameMilliseconds, settings.Bitrate, settings.EnableDtx, settings.EnableFec);
-            playback.Start(settings.SampleRate, settings.Channels, settings.PlaybackBufferMilliseconds, settings.FrameMilliseconds);
-            microphone.FrameReady += OnMicrophoneFrame;
-            microphone.Start(settings.SampleRate, settings.Channels, settings.FrameMilliseconds, settings.MicrophoneBufferMilliseconds);
-            network.OpusFrameReceived += OnOpusFrame;
-            await network.ConnectAsync(settings);
-            _initialized = true;
-
-            if (settings.DebugEnabled && settings.DebugForceTransmit)
+            if (_initialized && settings.Enabled)
             {
-                Transmitting = true;
-                logger.LogWarning("[VoiceDebug] ForceTransmit is ENABLED. Microphone audio will transmit continuously while voice is active.");
+                if (!network.IsConnected)
+                {
+                    Transmitting = false;
+                    keyPoller.Stop();
+                    await network.ConnectAsync(settings);
+                    if (lifecycle != Volatile.Read(ref _lifecycle)) network.Dispose();
+                }
+                return;
+            }
+            if (!settings.Enabled && _initialized) Dispose();
+
+            Settings = settings;
+            CurrentMode = settings.DefaultMode;
+            if (!settings.Enabled)
+            {
+                logger.LogInformation("OblivionVoice is disabled by this server.");
+                return;
             }
 
-            UpdateHud();
-
-            logger.LogInformation("{Brand} initialized. Mode={Mode} Range={Range}m", settings.BrandName, CurrentMode, GetCurrentRange());
-
-            if (settings.DebugEnabled)
+            try
             {
-                logger.LogInformation(
-                    "[VoiceDebug] Enabled Host={Host}:{Port} PTT={PttKey}/{PttMode} Loopback={Loopback} PacketLog={PacketLog} Stats={Stats} Levels={Levels} Interval={Interval}s",
-                    settings.Host,
-                    settings.Port,
-                    settings.TransmitKey,
-                    settings.TransmitMode,
-                    settings.DebugLoopbackMicrophone,
-                    settings.DebugLogPackets,
-                    settings.DebugLogClientStats,
-                    settings.DebugLogAudioLevels,
-                    settings.DebugStatsIntervalSeconds);
+
+                readyMKeys.Register(settings, this);
+
+                ConfigureSpatial(settings);
+                ConfigurePreprocessor(settings);
+
+                codec.Configure(settings.SampleRate, settings.Channels, settings.FrameMilliseconds, settings.Bitrate, settings.EnableDtx, settings.EnableFec);
+                playback.Start(settings.SampleRate, settings.Channels, settings.PlaybackBufferMilliseconds, settings.FrameMilliseconds);
+                microphone.FrameReady += OnMicrophoneFrame;
+                microphone.Start(settings.SampleRate, settings.Channels, settings.FrameMilliseconds, settings.MicrophoneBufferMilliseconds);
+                network.OpusFrameReceived += OnOpusFrame;
+                await network.ConnectAsync(settings);
+                if (lifecycle != Volatile.Read(ref _lifecycle))
+                {
+                    network.Dispose();
+                    return;
+                }
+                _initialized = true;
+
+                if (settings.DebugEnabled && settings.DebugForceTransmit)
+                {
+                    Transmitting = true;
+                    logger.LogWarning("[VoiceDebug] ForceTransmit is ENABLED. Microphone audio will transmit continuously while voice is active.");
+                }
+
+                UpdateHud();
+
+                logger.LogInformation("{Brand} initialized. Mode={Mode} Range={Range}m", settings.BrandName, CurrentMode, GetCurrentRange());
+
+                if (settings.DebugEnabled)
+                {
+                    logger.LogInformation(
+                        "[VoiceDebug] Enabled Host={Host}:{Port} PTT={PttKey}/{PttMode} Loopback={Loopback} PacketLog={PacketLog} Stats={Stats} Levels={Levels} Interval={Interval}s",
+                        settings.Host,
+                        settings.Port,
+                        settings.TransmitKey,
+                        settings.TransmitMode,
+                        settings.DebugLoopbackMicrophone,
+                        settings.DebugLogPackets,
+                        settings.DebugLogClientStats,
+                        settings.DebugLogAudioLevels,
+                        settings.DebugStatsIntervalSeconds);
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "OblivionVoice client initialization failed.");
+
+                Console.WriteLine($"[OblivionVoice] CLIENT INIT FAILED: {ex}");
+                Dispose();
             }
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "OblivionVoice client initialization failed.");
-
-            Console.WriteLine($"[OblivionVoice] CLIENT INIT FAILED: {ex}");
-            Dispose();
+            logger.LogWarning(ex, "Voice reconnection failed; automatic retry remains active.");
         }
+        finally { Volatile.Write(ref _bootstrapping, 0); }
     }
 
     private void UpdateHud()
@@ -113,6 +157,11 @@ public sealed class VoiceRuntime(
         if (!Settings.Enabled) return;
 
         var body = $"{CurrentMode} - {GetCurrentRange():0}m";
+        if (!network.IsConnected)
+        {
+            hud.SetText($"[CONNECTING] {body}");
+            return;
+        }
 
         hud.SetText(Muted
             ? $"[MUTED] {body}"
@@ -159,7 +208,7 @@ public sealed class VoiceRuntime(
 
     public void OnTransmitKeyPressed()
     {
-        if (!_initialized)
+        if (!_initialized || !network.IsConnected)
         {
             if (Settings.DebugEnabled && Settings.DebugLogKeyEvents)
                 logger.LogWarning("[VoiceDebug] PTT key fired before voice initialization completed.");
@@ -251,7 +300,7 @@ public sealed class VoiceRuntime(
 
         MaybeLogStats();
 
-        if (!Transmitting) return;
+        if (!Transmitting || !network.IsConnected) return;
 
         if (!hasSpeech)
         {
@@ -294,15 +343,16 @@ private void OnOpusFrame(
             _ => Settings.NormalMeters
         };
 
+        range = MathF.Min(range, Settings.MaximumReceiveMeters);
         var placement = spatial.Resolve(speakerId, range);
 
-        if (!placement.Audible && !Settings.ServerSideRouting)
+        if (!placement.Audible)
         {
             _spatiallyDropped++;
             return;
         }
 
-        var gain = placement.Audible ? placement.Gain : 0.05f;
+        var gain = placement.Gain;
 
         environmentDirector.Apply(speakerId, environment);
 
@@ -373,6 +423,10 @@ private void OnOpusFrame(
 
     public void Dispose()
     {
+        Interlocked.Increment(ref _lifecycle);
+        Transmitting = false;
+        _lastConnected = false;
+        Settings = new();
         _initialized = false;
 
         try { hud.Hide(); } catch { }

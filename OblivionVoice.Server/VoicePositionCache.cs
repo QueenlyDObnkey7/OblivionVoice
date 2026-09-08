@@ -20,7 +20,7 @@ public sealed class VoicePositionCache(ILogger logger)
         public bool SharesSpaceWith(in PlayerPlacement other)
         {
             if (CellKind == ParentCellKind.Unknown || other.CellKind == ParentCellKind.Unknown)
-                return true;
+                return false;
 
             if (CellKind != other.CellKind) return false;
             if (CellKind == ParentCellKind.Exterior) return true;
@@ -29,12 +29,14 @@ public sealed class VoicePositionCache(ILogger logger)
         }
     }
 
-    private volatile Dictionary<string, PlayerPlacement> _snapshot = new(StringComparer.Ordinal);
+    private sealed record Snapshot(Dictionary<string, PlayerPlacement> Players, long RefreshedAt);
+    private static readonly Dictionary<string, PlayerPlacement> Empty = new(StringComparer.Ordinal);
+    private volatile Snapshot _snapshot = new(Empty, 0);
     private long _refreshCount;
     private int _interiorCount;
     private int _cellMatchCount;
 
-    public int Count => _snapshot.Count;
+    public int Count => GetSnapshot().Count;
 
     public long RefreshCount => _refreshCount;
 
@@ -42,17 +44,24 @@ public sealed class VoicePositionCache(ILogger logger)
 
     public int CellMatchCount => _cellMatchCount;
 
+    public IReadOnlyDictionary<string, PlayerPlacement> GetSnapshot()
+    {
+        var snapshot = _snapshot;
+        return Environment.TickCount64 - snapshot.RefreshedAt <= 1000 ? snapshot.Players : Empty;
+    }
+
     public bool TryGet(string playerId, out PlayerPlacement placement) =>
-        _snapshot.TryGetValue(playerId, out placement);
+        GetSnapshot().TryGetValue(playerId, out placement);
 
     public void Refresh(EcsApi ecsApi)
     {
         try
         {
-            var next = new Dictionary<string, PlayerPlacement>(_snapshot.Count, StringComparer.Ordinal);
+            var next = new Dictionary<string, PlayerPlacement>(_snapshot.Players.Count, StringComparer.Ordinal);
 
             ecsApi.Query<MainCharacterComponent, TransformComponent>((ref character, ref transform) =>
             {
+                if (!float.IsFinite(transform.Position.X) || !float.IsFinite(transform.Position.Y) || !float.IsFinite(transform.Position.Z)) return;
                 next[character.PlayerId.ToString()] = new PlayerPlacement(
                     transform.Position, ParentCellKind.Unknown, 0, 0, VoiceEnvironment.Outdoor);
             });
@@ -82,13 +91,13 @@ public sealed class VoicePositionCache(ILogger logger)
 
             _interiorCount = interiors;
             _cellMatchCount = cellMatches;
-            _snapshot = next;
+            _snapshot = new(next, Environment.TickCount64);
             Interlocked.Increment(ref _refreshCount);
         }
         catch (Exception ex)
         {
 
-            logger.LogDebug(ex, "Voice position refresh failed; retaining the previous snapshot.");
+            logger.LogDebug(ex, "Voice position refresh failed; previous snapshot expires after one second.");
         }
     }
 }

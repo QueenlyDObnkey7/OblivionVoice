@@ -8,11 +8,21 @@ namespace OblivionVoice.Client;
 [ServerRpcFor(typeof(VoiceRpcContracts))]
 public partial class VoiceServerRpc(VoiceRuntime runtime, ILogger logger) : ServerRpcClient
 {
+    private bool _acceptReplies;
+    public bool DisabledByServer { get; private set; }
+    public void ResetBootstrap()
+    {
+        _acceptReplies = false;
+        HasReceivedBootstrap = false;
+        DisabledByServer = false;
+    }
+
     public bool HasReceivedBootstrap { get; private set; }
     public int BootstrapRequestsSent { get; private set; }
 
     public void RequestBootstrap(string reason = "unspecified")
     {
+        _acceptReplies = true;
         BootstrapRequestsSent++;
 
         logger.LogInformation(
@@ -64,7 +74,9 @@ public partial class VoiceServerRpc(VoiceRuntime runtime, ILogger logger) : Serv
         float worldUnitsPerMeter,
         bool invertPan)
     {
+        if (!_acceptReplies || OblivionMp.Sdk.SDK.Sync.LocalPlayer is null) return;
         HasReceivedBootstrap = true;
+        DisabledByServer = !enabled;
 
         logger.LogInformation("[VoiceDebug] VoiceSessionResponse RPC received from server. Enabled={Enabled} Host={Host}:{Port}", enabled, advertisedHost, port);
         Console.WriteLine($"[OblivionVoice] VoiceSessionResponse received. Enabled={enabled} Host={advertisedHost}:{port}");

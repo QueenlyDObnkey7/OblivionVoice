@@ -8,196 +8,192 @@ namespace OblivionVoice.Client.Net;
 
 public sealed class UdpVoiceClient(ILogger logger) : IDisposable
 {
+    private sealed class Connection(UdpClient socket, IPEndPoint server)
+    {
+        public readonly UdpClient Socket = socket;
+        public readonly IPEndPoint Server = server;
+        public readonly CancellationTokenSource Cancellation = new();
+        public long LastReply = Environment.TickCount64;
+        public volatile bool Accepted;
+    }
 
     public event Action<string, ushort, VoiceMode, VoiceEnvironment, ReadOnlyMemory<byte>>? OpusFrameReceived;
-
     public event Action? Connected;
-
-    private UdpClient? _udp;
-    private CancellationTokenSource? _cts;
-    private IPEndPoint? _server;
-    private Task? _receiveLoop;
-    private Task? _keepAliveLoop;
+    private Connection? _connection;
+    private int _generation;
     private ushort _sequence;
-    private bool _debugEnabled;
     private bool _debugLogPackets;
     private long _malformedPackets;
 
-    public bool IsConnected { get; private set; }
+    public bool IsConnected
+    {
+        get
+        {
+            var connection = Volatile.Read(ref _connection);
+            return connection is { Accepted: true } &&
+                Environment.TickCount64 - Interlocked.Read(ref connection.LastReply) < 15000;
+        }
+    }
 
     public async Task ConnectAsync(VoiceClientSettings settings)
     {
         DisposeSocket();
-
-        _debugEnabled = settings.DebugEnabled;
+        var generation = Volatile.Read(ref _generation);
         _debugLogPackets = settings.DebugEnabled && settings.DebugLogPackets;
-
-        var addresses = await Dns.GetHostAddressesAsync(settings.Host);
+        var addresses = await Dns.GetHostAddressesAsync(settings.Host).WaitAsync(TimeSpan.FromSeconds(5));
+        if (generation != Volatile.Read(ref _generation)) return;
         var address = addresses.FirstOrDefault(x => x.AddressFamily == AddressFamily.InterNetwork)
-                      ?? addresses.FirstOrDefault()
-                      ?? throw new InvalidOperationException($"Could not resolve voice host '{settings.Host}'.");
-
-        _server = new IPEndPoint(address, settings.Port);
-        _udp = new UdpClient(0);
-
-        if (OperatingSystem.IsWindows())
+            ?? addresses.FirstOrDefault()
+            ?? throw new InvalidOperationException($"Could not resolve voice host '{settings.Host}'.");
+        var server = new IPEndPoint(address, settings.Port);
+        var socket = new UdpClient(address.AddressFamily);
+        socket.Connect(server);
+        var connection = new Connection(socket, server);
+        Interlocked.Exchange(ref _connection, connection);
+        if (generation != Volatile.Read(ref _generation))
         {
-            try
-            {
-                const int SIO_UDP_CONNRESET = -1744830452;
-                _udp.Client.IOControl(SIO_UDP_CONNRESET, [0, 0, 0, 0], null);
-            }
-            catch (Exception ex)
-            {
-                logger.LogDebug(ex, "Could not disable UDP connection-reset reporting.");
-            }
+            Close(connection);
+            return;
         }
 
-        _cts = new CancellationTokenSource();
-        _receiveLoop = Task.Run(() => ReceiveLoop(_cts.Token));
-        _keepAliveLoop = Task.Run(() => KeepAliveLoop(_cts.Token));
-
         var tokenBytes = Encoding.UTF8.GetBytes(settings.SessionToken);
-        if (tokenBytes.Length > ushort.MaxValue)
-            throw new InvalidOperationException("Voice session token is too long.");
-
+        if (tokenBytes.Length is 0 or > 256)
+        {
+            Close(connection);
+            throw new InvalidOperationException("Voice session token length is invalid.");
+        }
         var hello = new byte[3 + tokenBytes.Length];
         hello[0] = VoiceUdpProtocol.Hello;
-        BitConverter.GetBytes((ushort)tokenBytes.Length).CopyTo(hello, 1);
+        BitConverter.TryWriteBytes(hello.AsSpan(1, 2), (ushort)tokenBytes.Length);
         tokenBytes.CopyTo(hello, 3);
-        await _udp.SendAsync(hello, _server);
-        logger.LogInformation("OblivionVoice UDP hello sent to {Endpoint}", _server);
+        _ = ReceiveLoop(connection);
+        _ = KeepAliveLoop(connection);
+        try
+        {
+            await socket.SendAsync(hello.AsMemory(), connection.Cancellation.Token);
+            logger.LogInformation("Voice authentication started at {Endpoint}.", server);
+        }
+        catch
+        {
+            Close(connection);
+            throw;
+        }
     }
 
     public async Task SendOpusAsync(VoiceMode mode, ReadOnlyMemory<byte> opusFrame)
     {
-        if (!IsConnected || _udp == null || _server == null || opusFrame.Length == 0) return;
-
+        var connection = Volatile.Read(ref _connection);
+        if (!IsConnected || connection == null || opusFrame.Length == 0) return;
         var packet = new byte[4 + opusFrame.Length];
         packet[0] = VoiceUdpProtocol.Audio;
-        BitConverter.GetBytes(_sequence++).CopyTo(packet, 1);
+        BitConverter.TryWriteBytes(packet.AsSpan(1, 2), _sequence++);
         packet[3] = (byte)mode;
         opusFrame.Span.CopyTo(packet.AsSpan(4));
-        await _udp.SendAsync(packet, _server);
-
-        if (_debugLogPackets)
-            logger.LogInformation("[VoiceDebug] UDP TX seq={Sequence} mode={Mode} bytes={Bytes}", (ushort)(_sequence - 1), mode, packet.Length);
+        try { await connection.Socket.SendAsync(packet.AsMemory(), connection.Cancellation.Token); }
+        catch (Exception ex)
+        {
+            if (!connection.Cancellation.IsCancellationRequested)
+                logger.LogDebug(ex, "Voice send failed; requesting recovery.");
+            Close(connection);
+        }
     }
 
-    private async Task ReceiveLoop(CancellationToken token)
+    private async Task ReceiveLoop(Connection connection)
     {
-        if (_udp == null) return;
-
         try
         {
-            while (!token.IsCancellationRequested)
+            while (!connection.Cancellation.IsCancellationRequested)
             {
-                UdpReceiveResult result;
-                try { result = await _udp.ReceiveAsync(token); }
-                catch (OperationCanceledException) { break; }
-                catch (ObjectDisposedException) { break; }
+                var result = await connection.Socket.ReceiveAsync(connection.Cancellation.Token);
+                if (!ReferenceEquals(connection, Volatile.Read(ref _connection))) break;
+                if (!result.RemoteEndPoint.Equals(connection.Server)) continue;
+                try { HandlePacket(connection, result.Buffer); }
                 catch (Exception ex)
                 {
-                    logger.LogDebug(ex, "Voice UDP receive failed.");
-                    continue;
-                }
-
-                try
-                {
-                    HandlePacket(result);
-                }
-                catch (Exception ex)
-                {
-                    _malformedPackets++;
-
-                    if (_malformedPackets <= 5 || _malformedPackets % 500 == 0)
-                    {
-                        logger.LogWarning(
-                            ex,
-                            "Dropped malformed voice packet from {Endpoint} ({Bytes} bytes). Total dropped: {Count}.",
-                            result.RemoteEndPoint,
-                            result.Buffer.Length,
-                            _malformedPackets);
-                    }
+                    var count = Interlocked.Increment(ref _malformedPackets);
+                    if (count <= 5 || count % 500 == 0)
+                        logger.LogWarning(ex, "Dropped malformed voice packet. Count={Count}", count);
                 }
             }
         }
-        catch (Exception ex)
-        {
-
-            logger.LogError(ex, "OblivionVoice UDP receive loop terminated unexpectedly.");
-            Console.WriteLine($"[OblivionVoice] UDP RECEIVE LOOP DIED: {ex}");
-        }
+        catch (OperationCanceledException) { }
+        catch (ObjectDisposedException) { }
+        catch (Exception ex) { logger.LogDebug(ex, "Voice receive stopped; requesting recovery."); }
+        finally { Close(connection); }
     }
 
-    private void HandlePacket(UdpReceiveResult result)
+    private void HandlePacket(Connection connection, byte[] packet)
     {
-        if (result.Buffer.Length == 0) return;
-
-        if (result.Buffer[0] == VoiceUdpProtocol.HelloAccepted)
+        if (packet.Length == 1 && packet[0] == VoiceUdpProtocol.HelloAccepted)
         {
-            IsConnected = true;
-            logger.LogInformation("OblivionVoice UDP session accepted.");
-            Connected?.Invoke();
+            Interlocked.Exchange(ref connection.LastReply, Environment.TickCount64);
+            if (!connection.Accepted)
+            {
+                connection.Accepted = true;
+                logger.LogInformation("Voice connected.");
+                Connected?.Invoke();
+            }
             return;
         }
-
-        if (result.Buffer[0] != VoiceUdpProtocol.Audio || result.Buffer.Length < 8) return;
-
-        var speakerLength = BitConverter.ToUInt16(result.Buffer, 1);
-        const int speakerStart = 3;
-        var bodyStart = speakerStart + speakerLength;
-
-        if (speakerLength == 0 || result.Buffer.Length <= bodyStart + 4) return;
-
-        var speakerId = Encoding.UTF8.GetString(result.Buffer, speakerStart, speakerLength);
-        var sequence = BitConverter.ToUInt16(result.Buffer, bodyStart);
-
-        var rawMode = result.Buffer[bodyStart + 2];
-        var mode = Enum.IsDefined((VoiceMode)rawMode) ? (VoiceMode)rawMode : VoiceMode.Normal;
-
-        var rawEnvironment = result.Buffer[bodyStart + 3];
-        var environment = Enum.IsDefined((VoiceEnvironment)rawEnvironment)
-            ? (VoiceEnvironment)rawEnvironment
-            : VoiceEnvironment.Outdoor;
-
-        var opusStart = bodyStart + 4;
-        var payload = new byte[result.Buffer.Length - opusStart];
-        Buffer.BlockCopy(result.Buffer, opusStart, payload, 0, payload.Length);
-
+        if (!connection.Accepted) return;
+        if (packet.Length == 1 && packet[0] == VoiceUdpProtocol.KeepAlive)
+        {
+            Interlocked.Exchange(ref connection.LastReply, Environment.TickCount64);
+            return;
+        }
+        if (packet.Length < 8 || packet[0] != VoiceUdpProtocol.Audio) return;
+        var speakerLength = BitConverter.ToUInt16(packet, 1);
+        var bodyStart = 3 + speakerLength;
+        if (speakerLength == 0 || packet.Length <= bodyStart + 4) return;
+        var mode = (VoiceMode)packet[bodyStart + 2];
+        if (!Enum.IsDefined(mode)) return;
+        var environment = (VoiceEnvironment)packet[bodyStart + 3];
+        if (!Enum.IsDefined(environment)) return;
+        var speakerId = Encoding.UTF8.GetString(packet, 3, speakerLength);
+        var sequence = BitConverter.ToUInt16(packet, bodyStart);
+        Interlocked.Exchange(ref connection.LastReply, Environment.TickCount64);
         if (_debugLogPackets)
-            logger.LogInformation("[VoiceDebug] UDP RX speaker={Speaker} seq={Sequence} mode={Mode} env={Environment} bytes={Bytes}", speakerId, sequence, mode, environment, result.Buffer.Length);
-
-        OpusFrameReceived?.Invoke(speakerId, sequence, mode, environment, payload);
+            logger.LogInformation("Voice RX speaker={Speaker} sequence={Sequence}", speakerId, sequence);
+        OpusFrameReceived?.Invoke(speakerId, sequence, mode, environment, packet.AsMemory(bodyStart + 4));
     }
 
-    private async Task KeepAliveLoop(CancellationToken token)
+    private async Task KeepAliveLoop(Connection connection)
     {
-        while (!token.IsCancellationRequested)
+        try
         {
-            try { await Task.Delay(TimeSpan.FromSeconds(5), token); }
-            catch (OperationCanceledException) { break; }
-            if (_udp == null || _server == null) continue;
-            try { await _udp.SendAsync(new byte[] { VoiceUdpProtocol.KeepAlive }, _server); }
-            catch { }
+            while (!connection.Cancellation.IsCancellationRequested)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(2), connection.Cancellation.Token);
+                var timeout = connection.Accepted ? 15000 : 8000;
+                if (Environment.TickCount64 - Interlocked.Read(ref connection.LastReply) >= timeout)
+                {
+                    logger.LogWarning("Voice connection timed out; a fresh session will be requested.");
+                    break;
+                }
+                await connection.Socket.SendAsync(new byte[] { VoiceUdpProtocol.KeepAlive }.AsMemory(), connection.Cancellation.Token);
+            }
         }
+        catch (OperationCanceledException) { }
+        catch (ObjectDisposedException) { }
+        catch (Exception ex) { logger.LogDebug(ex, "Voice heartbeat stopped."); }
+        finally { Close(connection); }
+    }
+
+    private void Close(Connection connection)
+    {
+        Interlocked.CompareExchange(ref _connection, null, connection);
+        connection.Accepted = false;
+        try { connection.Cancellation.Cancel(); } catch { }
+        try { connection.Socket.Dispose(); } catch { }
     }
 
     private void DisposeSocket()
     {
-        try
-        {
-            if (_udp != null && _server != null)
-                _udp.Send(new byte[] { VoiceUdpProtocol.Disconnect }, 1, _server);
-        }
-        catch { }
-        try { _cts?.Cancel(); } catch { }
-        try { _udp?.Dispose(); } catch { }
-        _cts?.Dispose();
-        _udp = null;
-        _server = null;
-        _cts = null;
-        IsConnected = false;
+        Interlocked.Increment(ref _generation);
+        var connection = Interlocked.Exchange(ref _connection, null);
+        if (connection == null) return;
+        try { connection.Socket.Send(new byte[] { VoiceUdpProtocol.Disconnect }, 1); } catch { }
+        Close(connection);
     }
 
     public void Dispose() => DisposeSocket();

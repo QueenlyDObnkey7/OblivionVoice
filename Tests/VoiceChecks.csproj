@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="Bootstrap/**/*.cs" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.8" />
+    <Reference Include="../Dependencies/Server/*.dll" />
+    <Compile Include="../OblivionVoice.Common/VoiceMode.cs" />
+    <Compile Include="../OblivionVoice.Common/TransmitMode.cs" />
+    <Compile Include="../OblivionVoice.Common/VoiceEnvironment.cs" />
+    <Compile Include="../OblivionVoice.Client/VoiceClientSettings.cs" />
+    <Compile Include="../OblivionVoice.Client/Net/*.cs" />
+    <Compile Include="../OblivionVoice.Server/VoiceConfig.cs" />
+    <Compile Include="../OblivionVoice.Server/VoiceConfigLoader.cs" />
+    <Compile Include="../OblivionVoice.Server/VoicePositionCache.cs" />
+    <Compile Include="../OblivionVoice.Server/VoiceSessionTokenService.cs" />
+    <Compile Include="../OblivionVoice.Server/VoiceUdpProtocol.cs" />
+    <Compile Include="../OblivionVoice.Server/UdpVoiceRelay.cs" />
+  </ItemGroup>
+</Project>

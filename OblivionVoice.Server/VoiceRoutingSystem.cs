@@ -33,8 +33,8 @@ public sealed class VoiceRoutingSystem(
         {
             _loggedCullingOff = true;
             logger.LogInformation(
-                "Server-side distance culling is off; the relay forwards every frame to every client. " +
-                "Cell isolation and environment reverb are unaffected - they do not depend on it.");
+                "Server-side distance culling is off; distance is checked by receiving clients. " +
+                "Server cell filtering follows UseParentCell independently; environment lookup remains active.");
         }
 
         _sinceRefresh += tick.DeltaTime;

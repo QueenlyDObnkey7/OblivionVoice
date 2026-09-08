@@ -4,85 +4,49 @@ using ReadyM.Modloader.Mods;
 
 namespace OblivionVoice.Client;
 
-public sealed class VoiceBootstrapSystem(VoiceServerRpc serverRpc, ILogger logger) : ModSystemBase
+public sealed class VoiceBootstrapSystem(VoiceServerRpc serverRpc, VoiceRuntime runtime, ILogger logger) : ModSystemBase
 {
-
-    private const float RetrySeconds = 3f;
-    private static int _instanceCount;
-    private readonly int _instanceId = Interlocked.Increment(ref _instanceCount);
-
-    private const float InitialDelaySeconds = 1f;
-
-    private const int MaxAttempts = 10;
-
-    private float _sinceLocalPlayer;
-    private float _sinceLastAttempt;
-    private int _attempts;
-    private bool _wasInGame;
-    private bool _gaveUp;
+    private string? _playerId;
+    private float _sinceAttempt;
+    private float _retrySeconds = 1f;
+    private bool _wasConnected;
 
     protected override void OnUpdate(UpdateTick tick)
     {
-        var inGame = SDK.Sync.LocalPlayer is not null;
-
-        if (!inGame)
+        var localPlayer = SDK.Sync.LocalPlayer;
+        var playerId = localPlayer is { } player ? player.PlayerId.ToString() : null;
+        if (playerId != _playerId)
         {
-            if (_wasInGame)
-            {
-                logger.LogInformation("[VoiceDebug] Local player gone; voice bootstrap armed for next join.");
-                _wasInGame = false;
-                _sinceLocalPlayer = 0f;
-                _sinceLastAttempt = 0f;
-                _attempts = 0;
-                _gaveUp = false;
-            }
-
+            runtime.Dispose();
+            serverRpc.ResetBootstrap();
+            _playerId = playerId;
+            _sinceAttempt = 0f;
+            _retrySeconds = 1f;
+            _wasConnected = false;
+        }
+        if (playerId == null) return;
+        runtime.RefreshConnectionState();
+        if (runtime.IsVoiceConnected)
+        {
+            _wasConnected = true;
+            _sinceAttempt = 0f;
+            _retrySeconds = 3f;
             return;
         }
-
-        if (!_wasInGame)
+        if (_wasConnected)
         {
-            _wasInGame = true;
-            _sinceLocalPlayer = 0f;
-            _sinceLastAttempt = float.MaxValue;
-            logger.LogInformation("[VoiceDebug] Local player ready; voice bootstrap will begin shortly.");
+            _wasConnected = false;
+            _sinceAttempt = 0f;
+            _retrySeconds = 1f;
+            logger.LogWarning("Voice disconnected. Automatic recovery is active.");
         }
-
-        if (serverRpc.HasReceivedBootstrap || _gaveUp)
-            return;
-
-        _sinceLocalPlayer += tick.deltaTime;
-        if (_sinceLocalPlayer < InitialDelaySeconds)
-            return;
-
-        _sinceLastAttempt += tick.deltaTime;
-        if (_sinceLastAttempt < RetrySeconds)
-            return;
-
-        _sinceLastAttempt = 0f;
-        _attempts++;
-
-        if (_attempts > MaxAttempts)
-        {
-            _gaveUp = true;
-            logger.LogWarning(
-                "OblivionVoice gave up requesting a voice session after {Attempts} attempts. " +
-                "The server may not have OblivionVoice installed. Press F9 to retry manually.",
-                MaxAttempts);
-            Console.WriteLine(
-                $"[OblivionVoice] Gave up after {MaxAttempts} bootstrap attempts. Press F9 to retry.");
-            return;
-        }
-
-        try
-        {
-            serverRpc.RequestBootstrap($"auto bootstrap attempt {_attempts} (system #{_instanceId} of {_instanceCount})");
-        }
-        catch (Exception ex)
-        {
-
-            logger.LogError(ex, "OblivionVoice automatic voice session request failed.");
-            Console.WriteLine($"[OblivionVoice] Auto bootstrap request failed: {ex.Message}");
-        }
+        if (serverRpc.DisabledByServer) return;
+        if (runtime.IsBootstrapping) return;
+        _sinceAttempt += tick.deltaTime;
+        if (_sinceAttempt < _retrySeconds) return;
+        _sinceAttempt = 0f;
+        try { serverRpc.RequestBootstrap("automatic connection recovery"); }
+        catch (Exception ex) { logger.LogDebug(ex, "Voice session request failed; retrying."); }
+        _retrySeconds = MathF.Min(30f, MathF.Max(10f, _retrySeconds * 2f));
     }
 }

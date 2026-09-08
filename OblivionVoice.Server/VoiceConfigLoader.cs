@@ -37,11 +37,6 @@ public sealed class VoiceConfigLoader(ILogger logger)
 
         Current.Validate();
 
-        if (Current.Proximity.ServerSideRouting)
-        {
-            logger.LogWarning("ServerSideRouting=true was requested, but 0.2.0 does not yet have the Oblivion ECS spatial adapter. Relay will use authenticated broadcast routing until that adapter is enabled.");
-        }
-
         logger.LogInformation("OblivionVoice config loaded: Enabled={Enabled} Voice={Host}:{Port} Normal={Range}m",
             Current.Enabled, Current.Network.AdvertisedHost, Current.Network.Port, Current.Proximity.NormalMeters);
 
