@@ -90,7 +90,7 @@ Values below are the **shipped JSON values**, preserved from the uploaded packag
 | `Proximity.MaximumReceiveMeters` | `35.0` | Upper cap used by server routing. Must be at least ShoutMeters. With valid ordered ranges it normally does not reduce any mode’s range. |
 | `Proximity.UseParentCell` | `true` | Currently ineffective as a routing switch. The client cannot apply it; server cell filtering instead follows ServerSideRouting and runs regardless of this value. |
 | `Proximity.ServerSideRouting` | `true` | When true, relay filters by speaker range and shared space when positions are available, and includes the speaker environment. Missing positions can fall back to forwarding. When false, relay broadcasts and the client filters by distance; server cell filtering is off and environment falls back to Outdoor. |
-| `Proximity.WorldUnitsPerMeter` | `70.0` | Converts game coordinates into metres for distance checks. Keep positive. 70 is the supplied assumption, not a verified SDK unit guarantee; calibrate in game before tuning ranges. |
+| `Proximity.WorldUnitsPerMeter` | `100.0` | Converts game coordinates into metres for distance checks. Keep positive. 70 is the supplied assumption, not a verified SDK unit guarantee; calibrate in game before tuning ranges. |
 | `Proximity.InvertPan` | `true` | Swaps the left/right spatial panning direction. Change if a speaker on your left sounds on your right. |
 | `Controls.TransmitKey` | `"N"` | Key that starts/stops local microphone transmission. Must be a valid ReadyM Key enum name; `N` is supplied. |
 | `Controls.TransmitMode` | `"Toggle"` | `Hold`: transmit while the key is held. `Toggle`: press once to start and again to stop. |
