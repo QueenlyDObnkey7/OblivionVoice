@@ -5,7 +5,8 @@ namespace OblivionVoice.Common;
 public static class VoiceRpcOffsets
 {
 
-    public static readonly byte? PinnedOffset = 0;
+    // Use the host allocation so voice cannot overwrite another mod's handlers.
+    public static readonly byte? PinnedOffset = null;
 
     public static byte HostAssignedOffset { get; private set; }
 

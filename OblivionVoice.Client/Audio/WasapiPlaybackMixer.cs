@@ -21,12 +21,21 @@ public sealed class WasapiPlaybackMixer(ILogger logger) : IDisposable
     private MixingSampleProvider? _mixer;
     private int _sampleRate;
     private int _frameMilliseconds;
-    private bool _muted;
+    private volatile bool _muted;
 
     public int TargetJitterFrames { get; set; } = 3;
 
     public IReadOnlyCollection<string> ActiveSpeakers =>
         _speakers.Where(kvp => kvp.Value.Pipeline.IsActive).Select(kvp => kvp.Key).ToArray();
+
+    public float GetSpeakerSpeechLevel(string speakerId) => !_muted && _mixer is not null &&
+        _speakers.TryGetValue(speakerId, out var channel) && channel.Volume.Volume > 0
+        ? channel.Pipeline.CurrentSpeechLevel : 0;
+
+    public void ClearSpeechLevels()
+    {
+        foreach (var channel in _speakers.Values) channel.Pipeline.ClearSpeechLevel();
+    }
 
     public void Start(int sampleRate, int channels, int bufferMilliseconds, int frameMilliseconds = 20)
     {
@@ -140,7 +149,11 @@ public sealed class WasapiPlaybackMixer(ILogger logger) : IDisposable
             configure(channel.Pipeline.Effects);
     }
 
-    public void SetMuted(bool muted) => _muted = muted;
+    public void SetMuted(bool muted)
+    {
+        _muted = muted;
+        if (muted) ClearSpeechLevels();
+    }
 
     public void RemoveSpeaker(string speakerId)
     {

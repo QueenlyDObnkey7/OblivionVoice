@@ -6,9 +6,11 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <OblivionUIApiProject Condition="'$(OblivionUIApiProject)' == ''">$(MSBuildThisFileDirectory)..\..\OblivionUI\OblivionUI.Api\OblivionUI.Api.csproj</OblivionUIApiProject>
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="$(OblivionUIApiProject)"><Private>false</Private></ProjectReference>
     <ProjectReference Include="..\OblivionVoice.Common\OblivionVoice.Common.csproj" />
   </ItemGroup>
  <ItemGroup>
@@ -36,4 +38,5 @@
     <PackageReference Include="NAudio.Core" Version="3.0.1" />
     <PackageReference Include="NAudio.Wasapi" Version="3.0.1" />
   </ItemGroup>
+  <ItemGroup><EmbeddedResource Include="Animation/NativeFacial.tsv" LogicalName="OblivionVoice.NativeFacial.tsv" /></ItemGroup>
 </Project>

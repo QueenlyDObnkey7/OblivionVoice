@@ -92,7 +92,7 @@ public sealed class WindowsKeyPoller(ILogger logger) : IDisposable
         _releaseTask = null;
     }
 
-    private static bool TryResolveVirtualKey(string text, out int key)
+    public static bool TryResolveVirtualKey(string text, out int key)
     {
         key = 0;
         if (string.IsNullOrWhiteSpace(text))

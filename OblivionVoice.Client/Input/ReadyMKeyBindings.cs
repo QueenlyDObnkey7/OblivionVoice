@@ -8,17 +8,15 @@ namespace OblivionVoice.Client.Input;
 public sealed class ReadyMKeyBindings(ILogger logger)
 {
     private bool _registered;
+    private readonly HashSet<string> transmitKeys=new(StringComparer.OrdinalIgnoreCase);
+    public void RegisterTransmit(string key,VoiceRuntime runtime,VoiceClientSettings settings){if(!transmitKeys.Add(key))return;RegisterOne(key,()=>{if(runtime.EffectiveTransmitKey.Equals(key,StringComparison.OrdinalIgnoreCase))runtime.OnTransmitKeyPressed();},"push-to-talk",settings.DebugEnabled&&settings.DebugLogKeyEvents);}
+
 
     public void Register(VoiceClientSettings settings, VoiceRuntime runtime)
     {
+        RegisterTransmit(runtime.EffectiveTransmitKey,runtime,settings);
         if (_registered) return;
         _registered = true;
-
-        RegisterOne(
-            settings.TransmitKey,
-            runtime.OnTransmitKeyPressed,
-            "push-to-talk",
-            settings.DebugEnabled && settings.DebugLogKeyEvents);
 
         RegisterOne(
             settings.CycleRangeKey,

@@ -21,9 +21,58 @@ public sealed class VoiceRuntime(
     ILogger logger) : IDisposable
 {
     public VoiceClientSettings Settings { get; private set; } = new();
+    private VoicePreferences _preferences=new();
+    private bool _preferencesLoaded;
+    private volatile bool _settingsOpen;
+    public VoicePreferences Preferences => _preferences;
+    public string EffectiveTransmitKey => _preferences.TransmitKey ?? Settings.TransmitKey;
+    public TransmitMode EffectiveTransmitMode => _preferences.TransmitMode ?? Settings.TransmitMode;
+    public void EnsurePreferencesLoaded()
+    {
+        if(_preferencesLoaded)return;_preferencesLoaded=true;
+        try {_preferences=VoicePreferences.Load();}
+        catch(Exception ex){logger.LogWarning(ex,"Could not load local voice preferences; using defaults.");}
+    }
+    public void SetSettingsOpen(bool open)
+    {
+        _settingsOpen=open;
+        if(open){Transmitting=false;keyPoller.Stop();UpdateHud();}
+    }
+    public void ApplyPreferences(VoicePreferences next)
+    {
+        next.Validate();
+        var key=next.TransmitKey??Settings.TransmitKey;
+        if(!WindowsKeyPoller.TryResolveVirtualKey(key,out _)||!Enum.TryParse<ReadyM.Sdk.Common.Input.Key>(key,true,out var parsed)||!Enum.IsDefined(parsed)||key.Equals("F5",StringComparison.OrdinalIgnoreCase)||key.Equals("F10",StringComparison.OrdinalIgnoreCase)||key.Equals(Settings.CycleRangeKey,StringComparison.OrdinalIgnoreCase)||key.Equals(Settings.ToggleMuteKey,StringComparison.OrdinalIgnoreCase)||key.Equals("Escape",StringComparison.OrdinalIgnoreCase))throw new ArgumentException("Choose a supported key that is not used for voice settings, mute or range.");
+        if(IsBootstrapping)throw new InvalidOperationException("Voice is connecting. Try Apply again shortly.");
+        var previous=_preferences;
+        Transmitting=false;keyPoller.Stop();UpdateHud();
+        bool restart=_initialized && next.InputDeviceId!=previous.InputDeviceId;
+        try {
+            if(restart)microphone.Start(Settings.SampleRate,Settings.Channels,Settings.FrameMilliseconds,Settings.MicrophoneBufferMilliseconds,next.InputDeviceId);
+            readyMKeys.RegisterTransmit(key,this,Settings);
+            next.Save();_preferences=next;
+        } catch {
+            if(restart)try {microphone.Start(Settings.SampleRate,Settings.Channels,Settings.FrameMilliseconds,Settings.MicrophoneBufferMilliseconds,previous.InputDeviceId);}catch(Exception ex){logger.LogError(ex,"Could not restore previous microphone.");}
+            throw;
+        }
+    }
+
     public VoiceMode CurrentMode { get; private set; } = VoiceMode.Normal;
-    public bool Muted { get; private set; }
-    public bool Transmitting { get; private set; }
+    private volatile bool _muted;
+    public bool Muted { get => _muted; private set => _muted = value; }
+    private volatile bool _transmitting;
+    private readonly SpeechLevel _localSpeechLevel = new();
+    public bool Transmitting
+    {
+        get => _transmitting;
+        private set { _transmitting = value; if (!value) _localSpeechLevel.Clear(); }
+    }
+    public float LocalSpeechLevel => Settings.Enabled && Transmitting && !_settingsOpen && network.IsConnected ? _localSpeechLevel.Value : 0;
+    public float GetSpeakerSpeechLevel(string speakerId) => Settings.Enabled && network.IsConnected && !Muted ? playback.GetSpeakerSpeechLevel(speakerId) : 0;
+
+    private long _lastSpeechFrame;
+    public bool IsSpeaking => Transmitting && !_settingsOpen && network.IsConnected
+        && System.Diagnostics.Stopwatch.GetElapsedTime(Interlocked.Read(ref _lastSpeechFrame)).TotalSeconds < .25;
 
     private bool _initialized;
     private int _bootstrapping;
@@ -41,6 +90,7 @@ public sealed class VoiceRuntime(
         {
             Transmitting = false;
             keyPoller.Stop();
+            playback.ClearSpeechLevels();
             foreach (var speaker in playback.ActiveSpeakers.ToArray())
             {
                 playback.RemoveSpeaker(speaker);
@@ -83,6 +133,7 @@ public sealed class VoiceRuntime(
             }
             if (!settings.Enabled && _initialized) Dispose();
 
+            EnsurePreferencesLoaded();
             Settings = settings;
             CurrentMode = settings.DefaultMode;
             if (!settings.Enabled)
@@ -102,7 +153,11 @@ public sealed class VoiceRuntime(
                 codec.Configure(settings.SampleRate, settings.Channels, settings.FrameMilliseconds, settings.Bitrate, settings.EnableDtx, settings.EnableFec);
                 playback.Start(settings.SampleRate, settings.Channels, settings.PlaybackBufferMilliseconds, settings.FrameMilliseconds);
                 microphone.FrameReady += OnMicrophoneFrame;
-                microphone.Start(settings.SampleRate, settings.Channels, settings.FrameMilliseconds, settings.MicrophoneBufferMilliseconds);
+                try { microphone.Start(settings.SampleRate, settings.Channels, settings.FrameMilliseconds, settings.MicrophoneBufferMilliseconds,_preferences.InputDeviceId); }
+                catch when(!string.IsNullOrEmpty(_preferences.InputDeviceId)) {
+                    logger.LogWarning("Saved microphone is unavailable; using Windows default for this session.");
+                    microphone.Start(settings.SampleRate,settings.Channels,settings.FrameMilliseconds,settings.MicrophoneBufferMilliseconds);
+                }
                 network.OpusFrameReceived += OnOpusFrame;
                 await network.ConnectAsync(settings);
                 if (lifecycle != Volatile.Read(ref _lifecycle))
@@ -112,7 +167,7 @@ public sealed class VoiceRuntime(
                 }
                 _initialized = true;
 
-                if (settings.DebugEnabled && settings.DebugForceTransmit)
+                if (settings.DebugEnabled && settings.DebugForceTransmit && !_settingsOpen)
                 {
                     Transmitting = true;
                     logger.LogWarning("[VoiceDebug] ForceTransmit is ENABLED. Microphone audio will transmit continuously while voice is active.");
@@ -163,11 +218,8 @@ public sealed class VoiceRuntime(
             return;
         }
 
-        hud.SetText(Muted
-            ? $"[MUTED] {body}"
-            : Transmitting
-                ? $"[* LIVE] {body}"
-                : $"[ ] {body}");
+        hud.Hide(); // Connected voice activity is now the shared bottom-right speaker icon.
+
     }
 
     private void ConfigureSpatial(VoiceClientSettings settings)
@@ -223,7 +275,7 @@ public sealed class VoiceRuntime(
                 Transmitting);
         }
 
-        if (Settings.TransmitMode == TransmitMode.Toggle)
+        if (EffectiveTransmitMode == TransmitMode.Toggle)
         {
             SetTransmitting(!Transmitting);
             return;
@@ -232,14 +284,14 @@ public sealed class VoiceRuntime(
         SetTransmitting(true);
 
         keyPoller.WatchForRelease(
-            Settings.TransmitKey,
+            EffectiveTransmitKey,
             () => SetTransmitting(false),
             Settings.DebugEnabled && Settings.DebugLogKeyEvents);
     }
 
     public void SetTransmitting(bool transmitting)
     {
-        if (!_initialized) return;
+        if (!_initialized || (transmitting && _settingsOpen)) return;
         if (Transmitting == transmitting) return;
         Transmitting = transmitting;
         if (Settings.DebugEnabled && Settings.DebugLogKeyEvents)
@@ -285,7 +337,7 @@ public sealed class VoiceRuntime(
     {
         _microphoneFrames++;
 
-        if (pcm.Length == 0) return;
+        if (pcm.Length == 0) { _localSpeechLevel.Clear(); return; }
 
         if (_processBuffer.Length < pcm.Length)
             _processBuffer = new short[pcm.Length];
@@ -294,16 +346,18 @@ public sealed class VoiceRuntime(
         pcm.Span.CopyTo(frame);
 
         var hasSpeech = preprocessor.Process(frame);
+        _preferences.ApplyGain(frame);
 
         if (Settings.DebugEnabled && Settings.DebugLogAudioLevels)
             MaybeLogAudioLevel(frame);
 
         MaybeLogStats();
 
-        if (!Transmitting || !network.IsConnected) return;
+        if (_settingsOpen || !Transmitting || !network.IsConnected) { _localSpeechLevel.Clear(); return; }
 
         if (!hasSpeech)
         {
+            _localSpeechLevel.Clear();
             _vadGatedFrames++;
             return;
         }
@@ -313,13 +367,17 @@ public sealed class VoiceRuntime(
             var encoded = codec.Encode(frame);
             if (encoded.Length > 2)
             {
+                _localSpeechLevel.Publish(frame);
+                Interlocked.Exchange(ref _lastSpeechFrame,System.Diagnostics.Stopwatch.GetTimestamp());
                 _encodedPackets++;
                 _encodedBytes += encoded.Length;
                 _ = network.SendOpusAsync(CurrentMode, encoded);
             }
+            else _localSpeechLevel.Clear();
         }
         catch (Exception ex)
         {
+            _localSpeechLevel.Clear();
             logger.LogDebug(ex, "Voice encode/send failed.");
         }
     }
@@ -423,12 +481,14 @@ private void OnOpusFrame(
 
     public void Dispose()
     {
+        VoiceSettingsBook.Close();
         Interlocked.Increment(ref _lifecycle);
         Transmitting = false;
         _lastConnected = false;
         Settings = new();
         _initialized = false;
 
+        OblivionUI.SpeakerIndicators.Clear();
         try { hud.Hide(); } catch { }
 
         keyPoller.Stop();

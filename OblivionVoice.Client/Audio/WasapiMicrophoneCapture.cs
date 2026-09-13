@@ -14,6 +14,16 @@ public sealed class WasapiMicrophoneCapture(ILogger logger) : IDisposable
     public bool ConversionActive { get; private set; }
 
     private WasapiCapture? _capture;
+    private MMDevice? _device;
+    public sealed record InputDevice(string Id,string Name);
+    public static IReadOnlyList<InputDevice> ListInputDevices()
+    {
+        using var enumerator=new MMDeviceEnumerator();
+        var result=new List<InputDevice>{new("","Windows default microphone")};
+        foreach(var device in enumerator.EnumerateAudioEndPoints(DataFlow.Capture,DeviceState.Active))
+        {using(device) result.Add(new(device.ID,device.FriendlyName));}
+        return result;
+    }
     private BufferedWaveProvider? _deviceBuffer;
     private ISampleProvider? _converted;
 
@@ -25,11 +35,13 @@ public sealed class WasapiMicrophoneCapture(ILogger logger) : IDisposable
     private int _accumulated;
     private short[] _frame = [];
 
-    public void Start(int sampleRate, int channels, int frameMilliseconds, int bufferMilliseconds)
+    public void Start(int sampleRate, int channels, int frameMilliseconds, int bufferMilliseconds, string deviceId = "")
     {
         Stop();
 
-        var device = WasapiCapture.GetDefaultCaptureDevice();
+        using var enumerator=new MMDeviceEnumerator();
+        var device = string.IsNullOrEmpty(deviceId) ? WasapiCapture.GetDefaultCaptureDevice() : enumerator.GetDevice(deviceId);
+        _device=device;
         var capture = new WasapiCapture(device, true, Math.Max(20, bufferMilliseconds));
 
         try { capture.WaveFormat = new WaveFormat(sampleRate, 16, channels); }
@@ -148,6 +160,7 @@ public sealed class WasapiMicrophoneCapture(ILogger logger) : IDisposable
             _capture = null;
         }
 
+        _device?.Dispose(); _device=null;
         lock (_gate)
         {
             _deviceBuffer = null;

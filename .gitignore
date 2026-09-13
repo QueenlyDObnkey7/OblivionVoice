@@ -2,6 +2,8 @@
 **/obj/
 /Output/
 /Dependencies/
+/Inspection/
+/Backups/
 .vs/
 .idea/
 *.user

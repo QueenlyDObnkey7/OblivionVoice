@@ -76,6 +76,7 @@ $serverContentDir = Join-Path $scriptDir 'ServerContent'
 
 $hostProvided = @(
     'ReadyM.*',
+    'OblivionUI.Api*',
     'OblivionMp.Sdk*',
     'OblivionMpCSharpMod*',
     'Friflo.*',
@@ -155,6 +156,49 @@ Copy-Artifacts -Files $serverContentFiles -BaseDir $serverContentDir -DestRoot $
 Copy-Artifacts -Files $manifestFiles      -BaseDir $contentDir       -DestRoot $modRoot     -Label 'root'
 
 Copy-RemainingAssemblies -BaseDir $clientBuildDir -DestRoot $clientRoot -Label 'client'
+
+# The native mouth driver loads /Game/OblivionVoice/Animations/A_VoiceJaw.
+# Ship only the validated, owned mouth animation package in the client root.
+$mouthAssetDir = Join-Path $contentDir 'MouthAssets'
+$mouthAssetReceiptPath = Join-Path $mouthAssetDir 'receipt.json'
+$mouthAssetAllowedNames = @('OblivionVoice_Mouth.pak', 'OblivionVoice_Mouth.ucas', 'OblivionVoice_Mouth.utoc')
+if (-not (Test-Path -LiteralPath (Join-Path $mouthAssetDir 'OblivionVoice_Mouth.pak') -PathType Leaf)) {
+    throw 'Required mouth animation asset missing: Content/MouthAssets/OblivionVoice_Mouth.pak.'
+}
+if (-not (Test-Path -LiteralPath $mouthAssetReceiptPath -PathType Leaf)) {
+    throw 'Required mouth animation validation receipt missing: Content/MouthAssets/receipt.json.'
+}
+foreach ($mouthAssetItem in @((Get-Item -LiteralPath $mouthAssetDir -Force)) + @(Get-ChildItem -LiteralPath $mouthAssetDir -Recurse -Force)) {
+    if ($mouthAssetItem.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        throw "Refusing linked mouth asset content: $($mouthAssetItem.FullName)"
+    }
+}
+$mouthAssetNames = @(Get-ChildItem -LiteralPath $mouthAssetDir -File | Where-Object { $_.Name -in $mouthAssetAllowedNames } | Select-Object -ExpandProperty Name)
+if (('OblivionVoice_Mouth.ucas' -in $mouthAssetNames) -ne ('OblivionVoice_Mouth.utoc' -in $mouthAssetNames)) {
+    throw 'Mouth IoStore assets require both .ucas and .utoc.'
+}
+$mouthAssetReceipt = Get-Content -LiteralPath $mouthAssetReceiptPath -Raw | ConvertFrom-Json
+$mouthAssetEntries = @($mouthAssetReceipt.hashes.PSObject.Properties)
+if ($mouthAssetEntries.Count -ne $mouthAssetNames.Count) {
+    throw 'Mouth asset receipt does not match the available asset files.'
+}
+foreach ($mouthAssetEntry in $mouthAssetEntries) {
+    if ($mouthAssetEntry.Name -notin $mouthAssetNames -or $mouthAssetEntry.Value -notmatch '^[0-9a-fA-F]{64}$') {
+        throw "Unexpected mouth asset receipt entry: $($mouthAssetEntry.Name)"
+    }
+    $mouthAssetSource = Join-Path $mouthAssetDir $mouthAssetEntry.Name
+    if ((Get-FileHash -LiteralPath $mouthAssetSource -Algorithm SHA256).Hash -ne $mouthAssetEntry.Value) {
+        throw "Mouth asset validation failed: $($mouthAssetEntry.Name)"
+    }
+}
+foreach ($mouthAssetEntry in $mouthAssetEntries) {
+    $mouthAssetDestination = Join-Path $clientRoot $mouthAssetEntry.Name
+    Copy-Item -LiteralPath (Join-Path $mouthAssetDir $mouthAssetEntry.Name) -Destination $mouthAssetDestination -Force
+    if ((Get-FileHash -LiteralPath $mouthAssetDestination -Algorithm SHA256).Hash -ne $mouthAssetEntry.Value) {
+        throw "Packaged mouth asset hash mismatch: $($mouthAssetEntry.Name)"
+    }
+    Write-Note "client <- $($mouthAssetEntry.Name)"
+}
 
 $requiredClient = @(
     "$clientProject.dll",

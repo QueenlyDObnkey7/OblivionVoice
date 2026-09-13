@@ -41,10 +41,14 @@ public sealed class Mod : ModBase
     private VoiceRuntime _runtime = null!;
     public override void Start()
     {
-        Logger.LogInformation("OblivionVoice 0.4.4 client Start() called.");
-        Console.WriteLine("[OblivionVoice] 0.4.4 client Start() called.");
+        Logger.LogInformation("OblivionVoice 0.6.2 client Start() called.");
+        Console.WriteLine("[OblivionVoice] 0.6.2 client Start() called.");
 
         ApplyRpcOffsetPin();
+        SDK.Input.RegisterKeyBind(Key.F5, () =>
+        {
+            if (SDK.Input.CanApplyInput()) VoiceSettingsBook.Open(_runtime);
+        });
 
         SDK.Input.RegisterKeyBind(Key.F10, () =>
         {
@@ -111,6 +115,7 @@ public sealed class Mod : ModBase
 
             if (VoiceRpcOffsets.PinnedOffset is not { } pinned || pinned == before)
             {
+                VoiceRpcOffsets.ApplyPin();
                 Logger.LogInformation("[VoiceDebug] {OffsetState}", VoiceRpcOffsets.Describe());
                 Console.WriteLine($"[OblivionVoice] {VoiceRpcOffsets.Describe()}");
                 return;

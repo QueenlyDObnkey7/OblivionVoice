@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../OblivionVoice.Client/Animation/Native*.cs" Link="Native/%(Filename)%(Extension)" />
+    <EmbeddedResource Include="../../OblivionVoice.Client/Animation/NativeFacial.tsv" LogicalName="OblivionVoice.NativeFacial.tsv" />
+  </ItemGroup>
+</Project>

@@ -1,8 +1,20 @@
 # OblivionVoice
 
-Integrated proximity voice chat for OblivionMP / ReadyM. Source version **0.4.3**, with an SDK **0.2.0** minimum declared in the manifest.
+Integrated proximity voice chat for OblivionMP / ReadyM. Source version **0.6.2**, with an SDK **0.2.0** minimum declared in the manifest.
 
 The client captures Windows microphone audio, encodes it with Opus and sends it to an authenticated UDP relay. Other players hear spatial stereo playback, with per-speaker buffering, normalization and environment effects. No separate Mumble or TeamSpeak client is used.
+
+## Talking mouths
+
+Version 0.6.2 adds volume-driven mouth animation for your character and audible remote players. Open **F5 → Speaking** to enable it or adjust **Mouth movement**, then save on the Apply page. Existing preference files default to enabled at 65% strength.
+
+The local mouth follows microphone frames actually submitted for voice transmission. Remote mouths follow decoded speech as it leaves the jitter buffer. Pauses, packet loss and stale audio close the mouth; echo/reverb effects cannot keep it talking. Incoming mute suppresses remote mouth movement, while your own transmitted speech still animates. This is a natural talking motion based on audio volume, not phoneme or word-level lip sync.
+
+The animation uses the game's separate humanoid head rig and only the jaw expression curve. It blends over the current pose, yields to native dialogue, and releases its own animation when speaking stops. It does not replace body animations. Custom races without the native humanoid head component may be unsupported.
+
+The required `OblivionVoice_Mouth.pak` contains the mod's new animation asset; the native head skeleton remains supplied by the game. Build scripts verify the asset receipt and include the pak in the client download. Both sides retain the existing voice network protocol—no extra audio or facial RPC messages are sent.
+
+For a local update that preserves the deployed voice configuration and existing build outputs, use `BUILD-MOUTH.ps1` followed by `INSTALL-MOUTH.ps1`. These verify the currently installed dependency DLLs, run the checks, create a timestamped package and back up the files being replaced. The installer restarts the server and leaves an open game's cache untouched. Launch through ReadyM after installing.
 
 ## Requirements
 
@@ -133,3 +145,14 @@ Keys must exist in the installed SDK’s `Key` enum. Hold mode also requires the
 | `Copy-Official-Dependencies.ps1` | Copies SDK dependencies from a local official template. |
 | `OblivionVoice.sln`, `global.json` | Solution and SDK selection. |
 | `THIRD_PARTY.md` | Dependency inventory. |
+
+
+## Integrated UI update
+
+UI integration 0.6.1: F5 opens Microphone, Speaking and Apply tabs. Gain remains -24 to +24 dB with zero in the middle. Speaking includes a saved key picker (single supported keyboard key); Apply and save changes the real transmit binding. Closing without Apply discards the draft. The previous key stops transmitting after Apply. F5/F10, mute and range keys cannot be selected as the speak key.
+
+## Building with OblivionUI
+
+Clone [OblivionUI](https://github.com/QueenlyDObnkey7/OblivionUI) alongside this repository, naming its folder `OblivionUI`, and install its ready-built mod on the server. Supply the official SDK dependencies as described above. Alternatively, override the API source location with `dotnet build OblivionVoice.sln -c Release -p:OblivionUIApiProject="PATH/OblivionUI.Api/OblivionUI.Api.csproj"`.
+
+`BUILD-MOUTH.ps1` and `INSTALL-MOUTH.ps1` require an explicit `-ServerRoot` pointing to your local server. These optional helpers stage/install against an existing deployment; they are not required for a normal source build. The UI API assembly is supplied by OblivionUI at runtime and is intentionally excluded from the Voice package.

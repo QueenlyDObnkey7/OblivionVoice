@@ -1,0 +1,19 @@
+# Parameter contracts only. Field names, offsets, widths and total sizes are verified at runtime.
+# Native signatures: local UE5.3.2 Actor.h, SkeletalMeshComponent.h, AnimInstance.h, KismetSystemLibrary.h.
+# Zero-size entries are reflection-only; no UObject/animation-instance offsets are assumed.
+Conv_StringToName|28|InString:0:16|ReturnValue:16:12
+IsValid|9|Object:0:8|ReturnValue:8:1
+GetComponentByClass|16|ComponentClass:0:8|ReturnValue:8:8
+GetAnimInstance|8|ReturnValue:0:8
+GetCurrentActiveMontage|8|ReturnValue:0:8
+IsAnyMontagePlaying|1|ReturnValue:0:1
+MakeSoftObjectPath|56|PathString:0:16|ReturnValue:16:40
+Conv_SoftObjPathToSoftObjRef|88|SoftObjectPath:0:40|ReturnValue:40:48
+LoadAsset_Blocking|56|Asset:0:48|ReturnValue:48:8
+GetPlayLength|4|ReturnValue:0:4
+PlaySlotAnimationAsDynamicMontage|56|Asset:0:8|SlotNodeName:8:12|BlendInTime:20:4|BlendOutTime:24:4|InPlayRate:28:4|LoopCount:32:4|BlendOutTriggerTime:36:4|InTimeToStartMontageAt:40:4|ReturnValue:48:8
+Montage_Pause|8|Montage:0:8
+Montage_SetPosition|12|Montage:0:8|NewPosition:8:4
+Montage_Stop|16|InBlendOutTime:0:4|Montage:8:8
+GetObjectName|24|Object:0:8|ReturnValue:8:16
+GetPathName|24|Object:0:8|ReturnValue:8:16

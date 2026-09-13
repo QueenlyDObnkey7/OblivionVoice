@@ -7,6 +7,9 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Remove="Bootstrap/**/*.cs" />
+    <Compile Remove="Preferences/**/*.cs" /><Compile Remove="KeyBindings/**/*.cs" />
+    <Compile Remove="MouthAudio/**/*.cs" /><Compile Remove="MouthAnimation/**/*.cs" />
+    <Compile Remove="MouthNative/**/*.cs" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.8" />
     <Reference Include="../Dependencies/Server/*.dll" />
     <Compile Include="../OblivionVoice.Common/VoiceMode.cs" />

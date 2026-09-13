@@ -18,6 +18,9 @@ public sealed class SpeakerVoicePipeline : ISampleProvider, IDisposable
     public WaveFormat WaveFormat { get; }
 
     public bool IsActive { get; private set; }
+    private readonly SpeechLevel _speechLevel = new();
+    public float CurrentSpeechLevel => _speechLevel.Value;
+    public void ClearSpeechLevel() => _speechLevel.Clear();
 
     public long ConcealedFrames { get; private set; }
     public long DroppedLateFrames { get; private set; }
@@ -102,7 +105,7 @@ public sealed class SpeakerVoicePipeline : ISampleProvider, IDisposable
             {
                 if (!FillNextFrame())
                 {
-
+                    _speechLevel.Clear();
                     buffer[written..].Clear();
                     written = buffer.Length;
                     break;
@@ -189,7 +192,12 @@ public sealed class SpeakerVoicePipeline : ISampleProvider, IDisposable
             IsActive = true;
         }
 
-        if (samples <= 0) return false;
+        if (samples <= 0) { _speechLevel.Clear(); return false; }
+
+        // Meter the real decoded frame when playback consumes it, before gain,
+        // panning or reverb. Packet arrival and packet-loss concealment are not speech.
+        if (conceal) _speechLevel.Clear();
+        else _speechLevel.Publish(_decodeBuffer.AsSpan(0, samples));
 
         ConsumedFrames++;
 
@@ -217,6 +225,7 @@ public sealed class SpeakerVoicePipeline : ISampleProvider, IDisposable
 
     public void Dispose()
     {
+        _speechLevel.Clear();
         lock (_gate) _queue.Clear();
         Effects.Clear();
         _decoder.Dispose();
