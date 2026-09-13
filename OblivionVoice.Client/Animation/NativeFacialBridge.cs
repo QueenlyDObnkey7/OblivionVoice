@@ -26,9 +26,12 @@ internal sealed class NativeFacialBridge
     private readonly Dictionary<(string, nint), NativeFunctionLayout> _resolved = [];
     private readonly Dictionary<string, uint> _fieldNames = new(StringComparer.Ordinal);
     private int _nameWidth;
+    private readonly NativeScriptObjectCache _scriptObjects = new();
+    private readonly Func<string,nint> _findPath;
 
     public NativeFacialBridge()
     {
+        _findPath = FindObjectPath;
         nint module = GetModuleHandle("UE4SS.dll");
         if (module == 0) throw new NotSupportedException("UE4SS is not loaded.");
         T Bind<T>(string symbol) where T : Delegate => Marshal.GetDelegateForFunctionPointer<T>(NativeLibrary.GetExport(module, symbol));
@@ -52,7 +55,8 @@ internal sealed class NativeFacialBridge
         _contracts = NativeLayoutTable.Read(reader);
     }
 
-    public nint DefaultObject(string path) => _find(0, 0, path, false);
+    public nint DefaultObject(string path) => _scriptObjects.Find(path, _findPath);
+    private nint FindObjectPath(string path) => _find(0, 0, path, false);
 
     public nint Object(nint instance, string name)
     {
@@ -150,7 +154,7 @@ internal sealed class NativeFacialBridge
         };
     }
 
-    public NativeFacialResult Call(nint instance, string name, params (string Name, object Value)[] arguments)
+    public unsafe NativeFacialResult Call(nint instance, string name, params (string Name, object Value)[] arguments)
     {
         ValidateArguments(name, arguments);
         if (instance == 0) throw new InvalidOperationException($"Missing target for {name}.");
@@ -158,14 +162,14 @@ internal sealed class NativeFacialBridge
         if (function == 0) throw new MissingMethodException(name);
         var layout = Resolve(name, function);
         if ((ushort)Marshal.ReadInt16(_paramSize(function)) != layout.Size) throw new NotSupportedException($"Native function size changed: {name}.");
-        var data = new byte[layout.Size];
-        var allocations = new List<nint>();
-        nint memory = Marshal.AllocHGlobal(Math.Max(1, layout.Size));
+        var data = new byte[Math.Max(1, layout.Size)];
+        List<nint>? allocations = null;
         try
         {
             foreach (var (fieldName, value) in arguments)
             {
                 var field = layout.Fields[fieldName];
+                if (NativeArguments.TryWrite(data.AsSpan(field.Offset, field.Size), value)) continue;
                 byte[] bytes = value switch
                 {
                     nint pointer => BitConverter.GetBytes(pointer.ToInt64()),
@@ -181,25 +185,22 @@ internal sealed class NativeFacialBridge
                 if (bytes.Length != field.Size) throw new NotSupportedException($"Native argument ABI mismatch: {name}.{fieldName}.");
                 bytes.CopyTo(data, field.Offset);
             }
-            Marshal.Copy(data, 0, memory, data.Length);
-            _event(instance, function, memory);
-            Marshal.Copy(memory, data, 0, data.Length);
+            fixed (byte* memory = data) _event(instance, function, (nint)memory);
             return new(data, layout);
         }
         finally
         {
-            Marshal.FreeHGlobal(memory);
-            foreach (nint allocation in allocations) Marshal.FreeHGlobal(allocation);
+            if (allocations is not null) foreach (nint allocation in allocations) Marshal.FreeHGlobal(allocation);
         }
         byte[] PointerArray(nint[] pointers)
         {
-            nint array = Marshal.AllocHGlobal(pointers.Length * 8); allocations.Add(array);
+            nint array = Marshal.AllocHGlobal(pointers.Length * 8); (allocations ??= new()).Add(array);
             for (int i = 0; i < pointers.Length; i++) Marshal.WriteIntPtr(array, i * 8, pointers[i]);
             return [.. BitConverter.GetBytes(array.ToInt64()), .. BitConverter.GetBytes(pointers.Length), .. BitConverter.GetBytes(pointers.Length)];
         }
         byte[] StringBytes(string text)
         {
-            nint buffer = Marshal.StringToHGlobalUni(text); allocations.Add(buffer);
+            nint buffer = Marshal.StringToHGlobalUni(text); (allocations ??= new()).Add(buffer);
             return [.. BitConverter.GetBytes(buffer.ToInt64()), .. BitConverter.GetBytes(text.Length + 1), .. BitConverter.GetBytes(text.Length + 1)];
         }
     }
@@ -249,20 +250,21 @@ internal sealed class NativeFacialBridge
 
 internal sealed class NativeFacialResult(byte[] data, NativeFunctionLayout layout)
 {
+    private ReadOnlySpan<byte> View(string field) { var p = layout.Fields[field]; return data.AsSpan(p.Offset, p.Size); }
     public byte[] Bytes(string field = "ReturnValue")
     {
         var property = layout.Fields[field];
         return data.AsSpan(property.Offset, property.Size).ToArray();
     }
-    public bool Boolean(string field = "ReturnValue") => Bytes(field) is [var value] ? value != 0 : throw new NotSupportedException("Expected native Boolean.");
+    public bool Boolean(string field = "ReturnValue") => View(field) is [var value] ? value != 0 : throw new NotSupportedException("Expected native Boolean.");
     public nint Pointer(string field = "ReturnValue")
     {
-        byte[] raw = Bytes(field);
+        ReadOnlySpan<byte> raw = View(field);
         return raw.Length == 8 ? (nint)BitConverter.ToInt64(raw) : throw new NotSupportedException("Expected native object pointer.");
     }
     public double Float(string field)
     {
-        byte[] raw = Bytes(field);
+        ReadOnlySpan<byte> raw = View(field);
         double value = raw.Length == 4 ? BitConverter.ToSingle(raw) : throw new NotSupportedException("Expected native float.");
         return double.IsFinite(value) ? value : throw new InvalidDataException("Non-finite native float.");
     }

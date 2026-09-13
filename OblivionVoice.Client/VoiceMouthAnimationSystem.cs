@@ -12,6 +12,11 @@ public sealed class VoiceMouthAnimationSystem : ModSystemBase
     readonly ILogger logger;
     readonly NativeFacialDriver driver=new();
     readonly MouthAnimationController<ReadyMainCharacter> controller;
+    readonly List<MouthActor<ReadyMainCharacter>> actors = new();
+    readonly HashSet<string> ids = new(StringComparer.Ordinal);
+    double profileTotal, profilePeak;
+    int profileCount;
+    long profileAt = Environment.TickCount64;
     float elapsed;
     string? lastError;
 
@@ -26,10 +31,10 @@ public sealed class VoiceMouthAnimationSystem : ModSystemBase
         if(!float.IsFinite(tick.deltaTime)||tick.deltaTime<=0)return;
         elapsed+=tick.deltaTime;if(elapsed<1f/30)return;
         var step=Math.Min(elapsed,.25f);elapsed=0;
-        var actors=new List<MouthActor<ReadyMainCharacter>>();
+        actors.Clear(); ids.Clear();
+        long started = System.Diagnostics.Stopwatch.GetTimestamp();
         try
         {
-            var ids=new HashSet<string>(StringComparer.Ordinal);
             if(SDK.Sync.LocalPlayer is {IsValid:true} local)Add(local,runtime.LocalSpeechLevel);
             foreach(var player in SDK.Sync.AllPlayers)
             {
@@ -56,6 +61,17 @@ public sealed class VoiceMouthAnimationSystem : ModSystemBase
             foreach(var actor in actors)try{driver.Release(actor.Actor);}catch{ /* A disappearing pawn cannot be touched again. */ }
             controller.ForgetAll();driver.ForgetAll();
             if(lastError!=error.Message){lastError=error.Message;logger.LogWarning("[VoiceMouth] Facial update unavailable: {Reason}",error.Message);}
+        }
+        finally
+        {
+            double ms = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+            profileTotal += ms; profilePeak = Math.Max(profilePeak, ms); profileCount++;
+            if (Environment.TickCount64 - profileAt >= 30000)
+            {
+                if (runtime.Settings.DebugEnabled)
+                    logger.LogInformation("[VoiceMouth] Update CPU mean={Mean:F3}ms peak={Peak:F3}ms samples={Count}", profileTotal / profileCount, profilePeak, profileCount);
+                profileAt = Environment.TickCount64; profileTotal = profilePeak = 0; profileCount = 0;
+            }
         }
     }
 }

@@ -96,7 +96,7 @@ function Wait-VoiceReady($Process, [string]$Log, [string]$ExpectedVersion) {
 }
 
 $receipt = Get-Content -LiteralPath $ReceiptPath -Raw | ConvertFrom-Json
-if ($receipt.schemaVersion -ne 1 -or $receipt.release -ne 'mouth-animation' -or $receipt.version -ne '0.6.3') { throw 'Expected the verified mouth-animation 0.6.3 receipt.' }
+if ($receipt.schemaVersion -ne 1 -or $receipt.release -ne 'mouth-animation' -or $receipt.version -ne '0.6.4') { throw 'Expected the verified mouth-animation 0.6.4 receipt.' }
 $assetHashes = Convert-HashMap $receipt.assetHashes
 foreach ($name in $assetHashes.Keys) { if ($name -notin $allowedAssetNames) { throw "Unexpected mouth asset: $name" } }
 if (!$assetHashes.ContainsKey('OblivionVoice_Mouth.pak')) { throw 'Mouth asset set is missing its required .pak file.' }
@@ -123,7 +123,7 @@ foreach ($name in $assetHashes.Keys) { if ($hashes["client/$name"] -ne $assetHas
 Compare-Hashes $hashes (Hash-Tree $source) 'Verified package'
 Compare-Hashes $baseline (Hash-Tree $serverMod @($generatedFile)) 'Installed Voice baseline; rebuild the package if the baseline has changed'
 $manifest = Get-Content -LiteralPath (Join-Path $source 'manifest.json') -Raw | ConvertFrom-Json
-if ($manifest.uniqueId -ne 'OblivionVoice' -or $manifest.version -ne '0.6.3') { throw 'Unexpected package manifest.' }
+if ($manifest.uniqueId -ne 'OblivionVoice' -or $manifest.version -ne '0.6.4') { throw 'Unexpected package manifest.' }
 foreach ($dependency in $manifest.dependencies) {
     $found = @(Get-ChildItem -LiteralPath $serverMods -Directory | ForEach-Object {
         $path = Join-Path $_.FullName 'manifest.json'
@@ -226,13 +226,13 @@ try {
     $err = Join-Path $root "Output/server-mouth-$stamp-error.log"
     $started = Start-Process -FilePath $serverExe -WorkingDirectory $ServerRoot -WindowStyle Hidden -RedirectStandardOutput $out -RedirectStandardError $err -PassThru
     Write-ServerPidRecords $started.Id
-    Wait-VoiceReady $started $out '0.6.3'
+    Wait-VoiceReady $started $out '0.6.4'
     Compare-Hashes $hashes (Hash-Tree $serverMod @($generatedFile)) 'Voice package after restart'
     Compare-Hashes $otherBefore (Get-OtherModHashes) 'Other installed mods after restart'
     Compare-Hashes $progressAfterRestartBefore (Hash-Tree $dataRoot $afterRestartExcludedRuntimeData) 'Server progress after restart'
     if ((Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash -ne $configHash) { throw 'Server config changed after restart.' }
     $result = [pscustomobject]@{
-        version = '0.6.3'; installed = $true; serverPid = $started.Id; serverLog = $out; serverErrorLog = $err
+        version = '0.6.4'; installed = $true; serverPid = $started.Id; serverLog = $out; serverErrorLog = $err
         cacheInstalled = $cacheInstalled; cacheStatus = $cacheReason; relaunchRequired = $true; backup = $backup
         changedServerFiles = $changedFiles; changedCacheFiles = @($cacheChanges.ToArray())
         removedDuplicateCacheAssets = @($cacheRemovals.ToArray())

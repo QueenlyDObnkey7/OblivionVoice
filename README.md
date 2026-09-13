@@ -1,10 +1,12 @@
 # OblivionVoice
 
-Integrated proximity voice chat for OblivionMP / ReadyM. Source version **0.6.3**, with an SDK **0.2.0** minimum declared in the manifest.
+Integrated proximity voice chat for OblivionMP / ReadyM. Source version **0.6.4**, with an SDK **0.2.0** minimum declared in the manifest.
 
 The client captures Windows microphone audio, encodes it with Opus and sends it to an authenticated UDP relay. Other players hear spatial stereo playback, with per-speaker buffering, normalization and environment effects. No separate Mumble or TeamSpeak client is used.
 
 ## Talking mouths
+
+Version 0.6.4 caches stable native engine objects during speech, pins native argument buffers instead of copying through unmanaged allocations, and reuses mouth-update collections. Character/mesh/montage validity checks and 30 Hz mouth smoothing remain. Debug logs report mouth-update CPU mean/peak every 30 seconds; FPS improvement still needs an in-game comparison.
 
 Version 0.6.3 fixes animation loading in the shipping game, where asset-path structures differ from the Unreal editor. The bridge derives their sizes from the reflected name layout and retains strict argument checks.
 

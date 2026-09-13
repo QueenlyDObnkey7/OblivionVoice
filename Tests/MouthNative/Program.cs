@@ -126,4 +126,33 @@ retry.Record("alice","Head not ready",15);retry.Forget("alice");
 Check(!retry.TryGet("alice",15.1,out _),"A respawned actor must not inherit the old actor's cooldown.");
 retry.Record("alice","Head not ready",20);retry.Record("bob","Asset not ready",20);retry.Clear();
 Check(!retry.TryGet("alice",20.1,out _)&&!retry.TryGet("bob",20.1,out _),"Disconnect clears all native retry state.");
+var cache = new NativeScriptObjectCache();
+int lookups = 0;
+nint Find(string _) { lookups++; return (nint)123; }
+for (int frame = 0; frame < 3000; frame++)
+{
+    cache.Find("/Script/Engine.Default__KismetSystemLibrary", Find);
+    cache.Find("/Script/Altar.VHumanoidHeadComponent", Find);
+}
+Check(lookups == 2, "Stable native objects must not repeat global searches while speaking.");
+cache.Find(NativeFacialDriver.AnimationPath, Find);
+cache.Find(NativeFacialDriver.AnimationPath, Find);
+Check(lookups == 4, "Collectable game assets must be re-resolved, not held as stale pointers.");
+int retries = 0;
+nint Late(string _) => ++retries == 1 ? 0 : (nint)456;
+Check(cache.Find("/Script/Late.Class", Late) == 0, "Missing object remains unavailable.");
+Check(cache.Find("/Script/Late.Class", Late) == (nint)456, "Missing object is retried when it becomes available.");
+var packet = new byte[16];
+Check(NativeArguments.TryWrite(packet.AsSpan(0,8), (nint)0x12345678), "Pointer packed directly.");
+Check(NativeArguments.TryWrite(packet.AsSpan(8,4), .25f), "Float packed directly.");
+Check(BitConverter.ToInt64(packet,0) == 0x12345678 && BitConverter.ToSingle(packet,8) == .25f, "Direct argument packing preserves native values and offsets.");
+Reject<NotSupportedException>(() => NativeArguments.TryWrite(new byte[4], (nint)1), "Pointer truncation must be rejected.");
+Reject<NotSupportedException>(() => NativeArguments.TryWrite(new byte[8], .25f), "Float width mismatch must be rejected.");
+object boxedFloat = .25f;
+for (int i=0; i<100; i++) NativeArguments.TryWrite(packet.AsSpan(8,4), boxedFloat);
+long allocationStart = GC.GetAllocatedBytesForCurrentThread();
+for (int i=0; i<10000; i++) NativeArguments.TryWrite(packet.AsSpan(8,4), boxedFloat);
+long allocated = GC.GetAllocatedBytesForCurrentThread()-allocationStart;
+Check(allocated == 0, "Steady-state primitive packing must not allocate temporary arrays.");
+Console.WriteLine($"Performance checks: 6000 native-object requests used {lookups-2} global lookups before dynamic-asset tests; 10000 float writes allocated {allocated} bytes.");
 Console.WriteLine($"PASS: {checks} mouth-native offline checks. No SDK or native game calls were made.");
