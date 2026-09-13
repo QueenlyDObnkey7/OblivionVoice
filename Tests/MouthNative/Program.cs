@@ -47,8 +47,59 @@ Check(!contracts.ContainsKey("Montage_StopGroupByName")&&!contracts.ContainsKey(
 foreach(var entry in contracts)
 foreach(var field in entry.Value.Fields)
 {
-    int expected=NativeFacialBridge.ExpectedWidth(entry.Key,field.Key);
-    Check(expected==-1?field.Value.Size is 8 or 12:expected==field.Value.Size,$"Declared field width does not match contract: {entry.Key}.{field.Key}.");
+    int expected=NativeFacialBridge.ExpectedWidth(entry.Key,field.Key,12);
+    Check(expected==field.Value.Size,$"Declared editor field width does not match contract: {entry.Key}.{field.Key}.");
+}
+// Actual UE5 layouts: FSoftObjectPath is two FNames plus an FString; the soft
+// reference adds an eight-byte weak pointer. Shipping/editor FNames are 8/12.
+// These independent fixtures reproduce the shipping-game acquisition failure.
+var shipping = NativeLayoutTable.Read(new StringReader("""
+Conv_StringToName|24|InString:0:16|ReturnValue:16:8
+MakeSoftObjectPath|48|PathString:0:16|ReturnValue:16:32
+Conv_SoftObjPathToSoftObjRef|72|SoftObjectPath:0:32|ReturnValue:32:40
+LoadAsset_Blocking|48|Asset:0:40|ReturnValue:40:8
+PlaySlotAnimationAsDynamicMontage|48|Asset:0:8|SlotNodeName:8:8|BlendInTime:16:4|BlendOutTime:20:4|InPlayRate:24:4|LoopCount:28:4|BlendOutTriggerTime:32:4|InTimeToStartMontageAt:36:4|ReturnValue:40:8
+"""));
+foreach(var entry in shipping) { NativeFacialBridge.ValidateLayout(entry.Key,entry.Value,8); checks++; }
+foreach(var entry in contracts) { NativeFacialBridge.ValidateLayout(entry.Key,entry.Value,12); checks++; }
+foreach(string fn in shipping.Keys)
+{
+    Reject<NotSupportedException>(()=>NativeFacialBridge.ValidateLayout(fn,contracts[fn],8),"Editor-size arguments accepted with the shipping FName ABI.");
+    Reject<NotSupportedException>(()=>NativeFacialBridge.ValidateLayout(fn,shipping[fn],12),"Shipping-size arguments accepted with the editor FName ABI.");
+}
+foreach(int invalidNameWidth in new[]{0,4,16,int.MaxValue})
+    Reject<NotSupportedException>(()=>NativeFacialBridge.ValidateLayout("MakeSoftObjectPath",shipping["MakeSoftObjectPath"],invalidNameWidth),"Unsupported or uninitialized FName ABI accepted.");
+foreach(var invalidLayout in new NativeFunctionLayout[]
+{
+    new(-1,new(){{"ReturnValue",(0,32)}}),
+    new(16385,new(){{"ReturnValue",(0,32)}}),
+    new(48,new(){{"ReturnValue",(-1,32)}}),
+    new(48,new(){{"ReturnValue",(17,32)}}),
+    new(48,new(){{"ReturnValue",(16,0)}}),
+    new(48,new(){{"ReturnValue",(int.MaxValue,32)}}),
+    new(48,new(){{"ReturnValue",(16,int.MaxValue)}})
+})
+    Reject<NotSupportedException>(()=>NativeFacialBridge.ValidateLayout("MakeSoftObjectPath",invalidLayout,8),"Native parameter bounds failure accepted.");
+foreach(var (layouts, nameWidth) in new[]{(shipping,8),(contracts,12)})
+{
+    // Exercise the opaque return bytes passed through the loader chain. The
+    // pointer's offset changes too; retaining the editor offset would read past
+    // the shipping function's argument buffer.
+    foreach(var (producer, consumer, input) in new[]{
+        ("MakeSoftObjectPath","Conv_SoftObjPathToSoftObjRef","SoftObjectPath"),
+        ("Conv_SoftObjPathToSoftObjRef","LoadAsset_Blocking","Asset")})
+    {
+        var layout=layouts[producer];
+        var raw=Enumerable.Range(0,layout.Size).Select(i=>(byte)i).ToArray();
+        var returned=new NativeFacialResult(raw,layout).Bytes();
+        Check(returned.Length==layouts[consumer].Fields[input].Size,"Loader output must fit the next function's reflected input.");
+        Check(returned.Length==NativeFacialBridge.ExpectedWidth(consumer,input,nameWidth),"Loader chain must retain the observed FName ABI.");
+        Check(returned[0]==layout.Fields["ReturnValue"].Offset,"Opaque return must use its reflected offset.");
+    }
+    var load=layouts["LoadAsset_Blocking"];
+    var loaded=new byte[load.Size];
+    BitConverter.GetBytes(0x12345678L).CopyTo(loaded,load.Fields["ReturnValue"].Offset);
+    Check(new NativeFacialResult(loaded,load).Pointer()==(nint)0x12345678,"Loaded animation pointer must use the runtime return offset.");
 }
 foreach(string malformed in new[]{"Bad|-1","Bad|8|Object:1:8","Bad|8|Object:0:-1","Bad|8|Object:0:8|Object:0:8","Bad|8\nBad|8"})
     Reject<InvalidDataException>(()=>NativeLayoutTable.Read(new StringReader(malformed)),"Invalid native metadata was accepted.");

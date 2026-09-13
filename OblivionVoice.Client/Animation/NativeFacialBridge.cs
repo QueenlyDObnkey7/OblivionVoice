@@ -25,6 +25,7 @@ internal sealed class NativeFacialBridge
     private readonly Dictionary<string, NativeFunctionLayout> _contracts;
     private readonly Dictionary<(string, nint), NativeFunctionLayout> _resolved = [];
     private readonly Dictionary<string, uint> _fieldNames = new(StringComparer.Ordinal);
+    private int _nameWidth;
 
     public NativeFacialBridge()
     {
@@ -99,37 +100,50 @@ internal sealed class NativeFacialBridge
             var property = properties.Single(p => p.Name == index);
             fields.Add(field, (property.Offset, property.Size));
         }
-        foreach (var (field, value) in fields)
-        {
-            if (value.Offset < 0 || value.Size < 1 || value.Offset > size || value.Size > size - value.Offset)
-                throw new NotSupportedException($"Invalid native argument bounds: {name}.{field}.");
-            int width = ExpectedWidth(name, field);
-            if (width > 0 && value.Size != width || width == -1 && value.Size is not (8 or 12))
-                throw new NotSupportedException($"Native argument width changed: {name}.{field}.");
-        }
         var resolved = new NativeFunctionLayout(size, fields);
+        // FName is 12 bytes in the authoring editor, but 8 in the shipping game.
+        // Both soft-path structs contain two FNames. Derive their widths from the
+        // same reflected bootstrap instead of accepting mismatched layouts.
+        int nameWidth = name == "Conv_StringToName" ? fields["ReturnValue"].Size : _nameWidth;
+        ValidateLayout(name, resolved, nameWidth);
+        if (name == "Conv_StringToName") _nameWidth = nameWidth;
         _resolved.Add((name, function), resolved);
         return resolved;
     }
 
-    internal static int ExpectedWidth(string function, string field)
+    internal static void ValidateLayout(string name, NativeFunctionLayout layout, int nameWidth)
     {
-        if (field == "SlotNodeName") return -1;
-        if (function == "Conv_StringToName") return field == "InString" ? 16 : -1;
+        if (nameWidth is not (8 or 12)) throw new NotSupportedException("Unsupported native FName width.");
+        if (layout.Size < 0 || layout.Size > 16384) throw new NotSupportedException($"Invalid native parameter size: {name}.");
+        foreach (var (field, value) in layout.Fields)
+        {
+            if (value.Offset < 0 || value.Size < 1 || value.Offset > layout.Size || value.Size > layout.Size - value.Offset)
+                throw new NotSupportedException($"Invalid native argument bounds: {name}.{field}.");
+            int width = ExpectedWidth(name, field, nameWidth);
+            if (value.Size != width)
+                throw new NotSupportedException($"Native argument width changed: {name}.{field} (expected {width}, found {value.Size}, FName {nameWidth}).");
+        }
+    }
+
+    internal static int ExpectedWidth(string function, string field, int nameWidth)
+    {
+        if (nameWidth is not (8 or 12)) throw new NotSupportedException("Unsupported native FName width.");
+        if (field == "SlotNodeName") return nameWidth;
+        if (function == "Conv_StringToName") return field == "InString" ? 16 : nameWidth;
         if (field == "ReturnValue") return function switch
         {
             "IsValid" or "IsAnyMontagePlaying" => 1,
             "GetAnimInstance" or "GetComponentByClass" or "GetCurrentActiveMontage" or "LoadAsset_Blocking" or "PlaySlotAnimationAsDynamicMontage" => 8,
-            "MakeSoftObjectPath" => 40,
-            "Conv_SoftObjPathToSoftObjRef" => 48,
+            "MakeSoftObjectPath" => 2 * nameWidth + 16,
+            "Conv_SoftObjPathToSoftObjRef" => 2 * nameWidth + 24,
             "GetPlayLength" => 4,
             "GetObjectName" or "GetPathName" => 16,
             _ => throw new NotSupportedException($"No native return contract for {function}.")
         };
         return field switch
         {
-            "Object" or "ComponentClass" or "Asset" or "Montage" => function == "LoadAsset_Blocking" && field == "Asset" ? 48 : 8,
-            "SoftObjectPath" => 40,
+            "Object" or "ComponentClass" or "Asset" or "Montage" => function == "LoadAsset_Blocking" && field == "Asset" ? 2 * nameWidth + 24 : 8,
+            "SoftObjectPath" => 2 * nameWidth + 16,
             "PathString" => 16,
             "BlendInTime" or "BlendOutTime" or "InPlayRate" or "LoopCount" or "BlendOutTriggerTime" or "InTimeToStartMontageAt" or "InBlendOutTime" or "NewPosition" => 4,
             _ => throw new NotSupportedException($"No native width contract for {function}.{field}.")

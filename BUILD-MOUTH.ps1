@@ -4,7 +4,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $root = [IO.Path]::GetFullPath($PSScriptRoot)
 $installed = [IO.Path]::GetFullPath((Join-Path $ServerRoot 'mods/OblivionVoice'))
-$version = '0.6.2'
+$version = '0.6.3'
 $generatedRelative = 'server/OblivionVoice.server.trace.log'
 $changedFiles = @('client/OblivionVoice.Client.dll', 'manifest.json')
 $allowedAssetNames = @('OblivionVoice_Mouth.pak', 'OblivionVoice_Mouth.ucas', 'OblivionVoice_Mouth.utoc')

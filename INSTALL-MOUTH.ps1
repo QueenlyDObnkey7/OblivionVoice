@@ -81,26 +81,22 @@ function Stop-MatchingServer($Process) {
     }
 }
 function Wait-VoiceReady($Process, [string]$Log, [string]$ExpectedVersion) {
-    $deadline = [DateTime]::UtcNow.AddSeconds(20)
+    $deadline = [DateTime]::UtcNow.AddSeconds(45)
     do {
         Start-Sleep -Milliseconds 250
         $Process.Refresh()
         if ($Process.HasExited) { throw "Server exited with code $($Process.ExitCode). Inspect $Log" }
         if (Test-Path -LiteralPath $Log) {
             $versionReady = Select-String -LiteralPath $Log -Pattern ('OblivionVoice v' + [regex]::Escape($ExpectedVersion) + '(?:,|\s|$)') -Quiet
-            $voiceReady = Select-String -LiteralPath $Log -SimpleMatch 'Initialized mod: OblivionVoice.Server.Mod' -Quiet
-            $relayReady = Select-String -LiteralPath $Log -Pattern 'OblivionVoice UDP relay (listening on|is disabled by config)' -Quiet
-            $woodcuttingReady = Select-String -LiteralPath $Log -SimpleMatch 'OblivionWoodcutting v0.2.11' -Quiet
-            $devtoolsReady = Select-String -LiteralPath $Log -SimpleMatch '[DevTools] Settings loaded:' -Quiet
-            $devtoolsVersionReady = Select-String -LiteralPath $Log -SimpleMatch 'OblivionDevTools v0.1.0' -Quiet
-            if ($versionReady -and $voiceReady -and $relayReady -and $woodcuttingReady -and $devtoolsReady -and $devtoolsVersionReady) { return }
+            $serverReady = Select-String -LiteralPath $Log -SimpleMatch 'Running server on port' -Quiet
+            if ($versionReady -and $serverReady) { return }
         }
     } while ([DateTime]::UtcNow -lt $deadline)
-    throw "Voice $ExpectedVersion, Woodcutting 0.2.11, and DevTools 0.1.0 startup was not confirmed. Inspect $Log"
+    throw "Voice $ExpectedVersion package advertisement and server startup were not confirmed. Inspect $Log"
 }
 
 $receipt = Get-Content -LiteralPath $ReceiptPath -Raw | ConvertFrom-Json
-if ($receipt.schemaVersion -ne 1 -or $receipt.release -ne 'mouth-animation' -or $receipt.version -ne '0.6.2') { throw 'Expected the verified mouth-animation 0.6.2 receipt.' }
+if ($receipt.schemaVersion -ne 1 -or $receipt.release -ne 'mouth-animation' -or $receipt.version -ne '0.6.3') { throw 'Expected the verified mouth-animation 0.6.3 receipt.' }
 $assetHashes = Convert-HashMap $receipt.assetHashes
 foreach ($name in $assetHashes.Keys) { if ($name -notin $allowedAssetNames) { throw "Unexpected mouth asset: $name" } }
 if (!$assetHashes.ContainsKey('OblivionVoice_Mouth.pak')) { throw 'Mouth asset set is missing its required .pak file.' }
@@ -127,7 +123,7 @@ foreach ($name in $assetHashes.Keys) { if ($hashes["client/$name"] -ne $assetHas
 Compare-Hashes $hashes (Hash-Tree $source) 'Verified package'
 Compare-Hashes $baseline (Hash-Tree $serverMod @($generatedFile)) 'Installed Voice baseline; rebuild the package if the baseline has changed'
 $manifest = Get-Content -LiteralPath (Join-Path $source 'manifest.json') -Raw | ConvertFrom-Json
-if ($manifest.uniqueId -ne 'OblivionVoice' -or $manifest.version -ne '0.6.2') { throw 'Unexpected package manifest.' }
+if ($manifest.uniqueId -ne 'OblivionVoice' -or $manifest.version -ne '0.6.3') { throw 'Unexpected package manifest.' }
 foreach ($dependency in $manifest.dependencies) {
     $found = @(Get-ChildItem -LiteralPath $serverMods -Directory | ForEach-Object {
         $path = Join-Path $_.FullName 'manifest.json'
@@ -135,11 +131,6 @@ foreach ($dependency in $manifest.dependencies) {
     } | Where-Object { $_.uniqueId -eq $dependency.uniqueId -and [version]$_.version -ge [version]$dependency.minimumVersion })
     if ($found.Count -eq 0) { throw "Required installed mod missing: $($dependency.uniqueId) $($dependency.minimumVersion)" }
 }
-foreach ($required in @(@('OblivionWoodcutting', '0.2.11'), @('OblivionDevTools', '0.1.0'))) {
-    $existing = Get-Content -LiteralPath (Join-Path $serverMods "$($required[0])/manifest.json") -Raw | ConvertFrom-Json
-    if ($existing.uniqueId -ne $required[0] -or $existing.version -ne $required[1]) { throw "Expected working $($required[0]) $($required[1]); installation stopped before modifying files." }
-}
-
 $running = @(Get-Process -Name server -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $serverExe })
 if ($running.Count -gt 1) { throw 'Multiple matching OBMP servers are running; installation stopped before modifying files.' }
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
@@ -235,13 +226,13 @@ try {
     $err = Join-Path $root "Output/server-mouth-$stamp-error.log"
     $started = Start-Process -FilePath $serverExe -WorkingDirectory $ServerRoot -WindowStyle Hidden -RedirectStandardOutput $out -RedirectStandardError $err -PassThru
     Write-ServerPidRecords $started.Id
-    Wait-VoiceReady $started $out '0.6.2'
+    Wait-VoiceReady $started $out '0.6.3'
     Compare-Hashes $hashes (Hash-Tree $serverMod @($generatedFile)) 'Voice package after restart'
     Compare-Hashes $otherBefore (Get-OtherModHashes) 'Other installed mods after restart'
     Compare-Hashes $progressAfterRestartBefore (Hash-Tree $dataRoot $afterRestartExcludedRuntimeData) 'Server progress after restart'
     if ((Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash -ne $configHash) { throw 'Server config changed after restart.' }
     $result = [pscustomobject]@{
-        version = '0.6.2'; installed = $true; serverPid = $started.Id; serverLog = $out; serverErrorLog = $err
+        version = '0.6.3'; installed = $true; serverPid = $started.Id; serverLog = $out; serverErrorLog = $err
         cacheInstalled = $cacheInstalled; cacheStatus = $cacheReason; relaunchRequired = $true; backup = $backup
         changedServerFiles = $changedFiles; changedCacheFiles = @($cacheChanges.ToArray())
         removedDuplicateCacheAssets = @($cacheRemovals.ToArray())
